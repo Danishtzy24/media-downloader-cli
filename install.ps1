@@ -1,5 +1,17 @@
+<#
+.SYNOPSIS
+    Media Downloader v1.0 - Final Clean Installer
+
+    Jalankan:
+        irm https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1 | iex
+
+    Perintah:
+        Media          → Jalankan
+        Remove-Media   → Uninstall (benar-benar bersih)
+#>
 
 $ErrorActionPreference = "Stop"
+
 $RepoRawUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/MediaDownloader.ps1"
 
 # Warna
