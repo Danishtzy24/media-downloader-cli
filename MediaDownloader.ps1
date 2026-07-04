@@ -639,15 +639,22 @@ function Show-WelcomeScreen {
         }
 
         if ($urlBuf -ne $lastUrl -or $field -ne $lastField) {
-            $urlMax = $m.Inner - 2   # sisakan 1 utk kursor blok
-            $shown = $urlBuf
+            $urlMax = $m.Inner - 2   # sisakan space untuk kursor blok
+            $shown = "URL: " + $urlBuf
             $isPlaceholder = $false
-            if (-not $shown) { $shown = "URL: $($script:Platforms[$script:PlatformIdx].Hint)"; $isPlaceholder = $true }
-            # tampilkan bagian AKHIR teks saat mengetik (posisi ketik selalu terlihat)
+            if (-not $urlBuf) { $shown = "URL: $($script:Platforms[$script:PlatformIdx].Hint)"; $isPlaceholder = $true }
+            
+            # Anti-spill: pastikan teks tidak melebihi lebar panel (mencegah native scroll)
             if ($shown.Length -gt $urlMax) {
-                if ($isPlaceholder) { $shown = Limit-Text -Text $shown -Max $urlMax }
-                else { $shown = '...' + $shown.Substring($shown.Length - ($urlMax - 3)) }
+                if ($isPlaceholder) { 
+                    $shown = Limit-Text -Text $shown -Max $urlMax 
+                } else { 
+                    $prefix = "URL: ..."
+                    $sisa = $urlMax - $prefix.Length
+                    $shown = $prefix + $urlBuf.Substring([Math]::Max(0, $urlBuf.Length - $sisa))
+                }
             }
+            
             $color = if ($urlBuf) { $FG_WHITE } else { $FG_DIM }
             $accent = if ($field -eq 0) { $FG_BLUE } else { $FG_DIM }
             $cursorGlyph = if ($field -eq 0) { "$FG_BLUE$GL_FULL$RESET" } else { '' }
