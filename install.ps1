@@ -19,16 +19,15 @@ if (!(Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 }
 
-Write-Host "$C_GRAY [1/5] Folder install: $InstallDir$R"
+Write-Host "$C_GRAY [1/4] Folder install: $InstallDir$R"
 
 $ScriptPath = Join-Path $InstallDir "MediaDownloader.ps1"
 
-Write-Host "$C_GRAY [2/5] Downloading...$R"
-Write-Host "$C_GRAY URL : $RepoRawUrl$R"
+Write-Host "$C_GRAY [2/4] Downloading...$R"
 
 try {
     Invoke-WebRequest -Uri $RepoRawUrl -OutFile $ScriptPath -UseBasicParsing
-    Write-Host "$C_GREEN Download berhasil.$R"
+    Write-Host "$C_GREEN       Download berhasil.$R"
 }
 catch {
     Write-Host ""
@@ -42,94 +41,32 @@ if (!(Test-Path $ScriptPath)) {
     return
 }
 
-$CmdShim = Join-Path $InstallDir "MediaDownloader.cmd"
-@"
-@echo off
-powershell -NoLogo -ExecutionPolicy Bypass -File "%USERPROFILE%\.media-downloader\MediaDownloader.ps1" %*
-"@ | Set-Content -Path $CmdShim -Encoding ASCII
-
-Write-Host "$C_GRAY [3/5] Launcher dibuat.$R"
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-
 if ($userPath -notlike "*$InstallDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
     $env:Path += ";$InstallDir"
-    Write-Host "$C_GRAY [4/5] PATH berhasil ditambahkan.$R"
-}
-else {
-    Write-Host "$C_GRAY [4/5] PATH sudah ada.$R"
+    Write-Host "$C_GRAY [3/4] PATH ditambahkan.$R"
+} else {
+    Write-Host "$C_GRAY [3/4] PATH sudah ada.$R"
 }
 
 if (!(Test-Path $PROFILE)) {
     New-Item -ItemType File -Force -Path $PROFILE | Out-Null
 }
 
-$ProfileText = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
-if (-not $ProfileText) { $ProfileText = "" }
+$ProfileBlock = @'
 
-$ProfileText = $ProfileText -replace "(?s)# ==== Media Downloader START ====.*?# ==== Media Downloader END ====", ""
-$ProfileText = $ProfileText.TrimEnd()
-
-$FunctionBlock = @"
-
-# ==== Media Downloader START ====
-function MediaDownloader {
-    & powershell -NoLogo -ExecutionPolicy Bypass -File "`$env:USERPROFILE\.media-downloader\MediaDownloader.ps1" @args
+# ==== MediaDownloader START ====
+function Media {
+    & powershell -NoLogo -ExecutionPolicy Bypass -File "$env:USERPROFILE\.media-downloader\MediaDownloader.ps1" @args
 }
 
-function Uninstall-MediaDownloader {
-    `$dir = Join-Path `$env:USERPROFILE ".media-downloader"
-
-    Write-Host ""
-    Write-Host "Uninstall Media Downloader?" -ForegroundColor Yellow
-    `$confirm = Read-Host "Ketik Y untuk lanjut"
-    if (`$confirm -ne 'Y' -and `$confirm -ne 'y') { Write-Host "Dibatalkan."; return }
-
-    # 1. Hapus folder install (script + settings)
-    if (Test-Path `$dir) {
-        Remove-Item -Path `$dir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
-    # 2. Hapus dari PATH user
-    `$p = [Environment]::GetEnvironmentVariable("Path", "User")
-    if (`$p) {
-        `$newPath = (`$p -split ';' | Where-Object { `$_ -and (`$_ -notlike "*`.media-downloader*") }) -join ';'
-        [Environment]::SetEnvironmentVariable("Path", `$newPath, "User")
-    }
-
-    # 3. Hapus blok dari PowerShell profile
-    if (Test-Path `$PROFILE) {
-        `$txt = Get-Content `$PROFILE -Raw
-        `$txt = `$txt -replace "(?s)# ==== Media Downloader START ====.*?# ==== Media Downloader END ====", ""
-        Set-Content -Path `$PROFILE -Value `$txt.TrimEnd()
-    }
-
-    # 4. Hapus function dari sesi aktif
-    Remove-Item Function:\MediaDownloader -ErrorAction SilentlyContinue
-
-    Write-Host ""
-    Write-Host "Media Downloader berhasil di-uninstall." -ForegroundColor Green
-    Write-Host "Sampai jumpa!" -ForegroundColor Gray
-    Write-Host ""
-
-    Remove-Item Function:\Uninstall-MediaDownloader -ErrorAction SilentlyContinue
-}
-# ==== Media Downloader END ====
-"@
-
-Set-Content -Path $PROFILE -Value ($ProfileText + $FunctionBlock)
-Write-Host "$C_GRAY [5/5] Perintah terdaftar di PROFILE.$R"
-
-$ScriptPathEsc = $ScriptPath
-Set-Item -Path Function:Global:MediaDownloader -Value ([ScriptBlock]::Create("& powershell -NoLogo -ExecutionPolicy Bypass -File `"$ScriptPathEsc`" @args"))
-
-Set-Item -Path Function:Global:Uninstall-MediaDownloader -Value {
+function Remove-Media {
     $dir = Join-Path $env:USERPROFILE ".media-downloader"
 
     Write-Host ""
-    Write-Host "Uninstall Media Downloader?" -ForegroundColor Yellow
-    $confirm = Read-Host "Ketik Y untuk lanjut"
-    if ($confirm -ne 'Y' -and $confirm -ne 'y') { Write-Host "Dibatalkan."; return }
+    $confirm = Read-Host "Uninstall Media Downloader? (Y/N)"
+    if ($confirm -notmatch "^[Yy]$") { Write-Host "Dibatalkan."; return }
 
     if (Test-Path $dir) {
         Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -137,31 +74,76 @@ Set-Item -Path Function:Global:Uninstall-MediaDownloader -Value {
 
     $p = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($p) {
-        $newPath = ($p -split ';' | Where-Object { $_ -and ($_ -notlike "*.media-downloader*") }) -join ';'
+        $newPath = ($p -split ";" | Where-Object { $_ -and ($_ -notlike "*.media-downloader*") }) -join ";"
         [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
     }
 
     if (Test-Path $PROFILE) {
         $txt = Get-Content $PROFILE -Raw
-        $txt = $txt -replace "(?s)# ==== Media Downloader START ====.*?# ==== Media Downloader END ====", ""
+        $txt = $txt -replace "(?s)# ==== MediaDownloader START ====.*?# ==== MediaDownloader END ====", ""
         Set-Content -Path $PROFILE -Value $txt.TrimEnd()
     }
 
-    Remove-Item Function:\MediaDownloader -ErrorAction SilentlyContinue
+    Remove-Item Function:\Media -ErrorAction SilentlyContinue
 
     Write-Host ""
-    Write-Host "Media Downloader berhasil di-uninstall." -ForegroundColor Green
-    Write-Host "Sampai jumpa!" -ForegroundColor Gray
+    Write-Host "Media Downloader berhasil di-uninstall. Sampai jumpa!" -ForegroundColor Green
     Write-Host ""
 
-    Remove-Item Function:\Uninstall-MediaDownloader -ErrorAction SilentlyContinue
+    Remove-Item Function:\Remove-Media -ErrorAction SilentlyContinue
+}
+# ==== MediaDownloader END ====
+'@
+
+$ProfileText = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
+if (-not $ProfileText) { $ProfileText = "" }
+
+$ProfileText = $ProfileText -replace "(?s)# ==== MediaDownloader START ====.*?# ==== MediaDownloader END ====", ""
+$ProfileText = $ProfileText -replace "(?s)# ==== Media Downloader START ====.*?# ==== Media Downloader END ====", ""
+$ProfileText = $ProfileText.TrimEnd()
+
+Set-Content -Path $PROFILE -Value ($ProfileText + "`r`n" + $ProfileBlock) -Encoding UTF8
+Write-Host "$C_GRAY [4/4] Perintah terdaftar di profile.$R"
+
+function Global:Media {
+    & powershell -NoLogo -ExecutionPolicy Bypass -File "$env:USERPROFILE\.media-downloader\MediaDownloader.ps1" @args
+}
+
+function Global:Remove-Media {
+    $dir = Join-Path $env:USERPROFILE ".media-downloader"
+
+    Write-Host ""
+    $confirm = Read-Host "Uninstall Media Downloader? (Y/N)"
+    if ($confirm -notmatch "^[Yy]$") { Write-Host "Dibatalkan."; return }
+
+    if (Test-Path $dir) {
+        Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $p = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($p) {
+        $newPath = ($p -split ";" | Where-Object { $_ -and ($_ -notlike "*.media-downloader*") }) -join ";"
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+    }
+
+    if (Test-Path $PROFILE) {
+        $txt = Get-Content $PROFILE -Raw
+        $txt = $txt -replace "(?s)# ==== MediaDownloader START ====.*?# ==== MediaDownloader END ====", ""
+        Set-Content -Path $PROFILE -Value $txt.TrimEnd()
+    }
+
+    Remove-Item Function:\Media -ErrorAction SilentlyContinue
+
+    Write-Host ""
+    Write-Host "Media Downloader berhasil di-uninstall. Sampai jumpa!" -ForegroundColor Green
+    Write-Host ""
+
+    Remove-Item Function:\Remove-Media -ErrorAction SilentlyContinue
 }
 
 Write-Host ""
 Write-Host "$C_GREEN Instalasi selesai!$R"
 Write-Host ""
-Write-Host "$C_WHITE Jalankan aplikasi :$R  $C_CYAN MediaDownloader$R"
-Write-Host "$C_WHITE Uninstall        :$R  $C_CYAN Uninstall-MediaDownloader$R"
-Write-Host ""
-Write-Host "$C_GRAY Perintah tetap tersedia di PowerShell baru.$R"
+Write-Host "$C_WHITE Jalankan  :$R $C_CYAN Media$R"
+Write-Host "$C_WHITE Uninstall :$R $C_CYAN Remove-Media$R"
 Write-Host ""
