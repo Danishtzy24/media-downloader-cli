@@ -1,3 +1,14 @@
+<#
+.SYNOPSIS
+    Media Downloader v1.0 - Installer
+
+    Install:
+        irm https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1 | iex
+
+    Perintah:
+        Media          - Jalankan
+        Remove-Media   - Uninstall
+#>
 
 $ErrorActionPreference = "Stop"
 
@@ -37,6 +48,11 @@ if ($userPath -notlike "*$InstallDir*") {
     $env:Path += ";$InstallDir"
 }
 
+# =====================================================
+# FUNGSI PEMBERSIH NUKLIR
+# Hapus SEMUA jejak dari profile apapun kondisinya
+# =====================================================
+
 function Global:Nuke-MediaProfile {
     if (!(Test-Path $PROFILE)) { return }
 
@@ -48,15 +64,18 @@ function Global:Nuke-MediaProfile {
     foreach ($line in $lines) {
         $t = $line.Trim()
 
+        # Skip marker (semua versi)
         if ($t -match 'MEDIA.?DOWNLOADER.?START' -or $t -match 'MediaDownloader.?START') { continue }
         if ($t -match 'MEDIA.?DOWNLOADER.?END' -or $t -match 'MediaDownloader.?END') { continue }
         if ($t -match '# Media Downloader') { continue }
 
+        # Deteksi awal function terkait
         if ($t -match '^function\s+(Global:)?(Media|Remove-Media|Uninstall-MediaDownloader|MediaDownloader)\b') {
             $inFunc = $true
             $braceDepth = 0
         }
 
+        # Hitung brace depth saat di dalam function
         if ($inFunc) {
             $openCount = ($t.ToCharArray() | Where-Object { $_ -eq '{' }).Count
             $closeCount = ($t.ToCharArray() | Where-Object { $_ -eq '}' }).Count
@@ -87,12 +106,19 @@ function Global:Nuke-MediaProfile {
     }
 }
 
+# =====================================================
+# BERSIHKAN PROFILE SEKARANG
+# =====================================================
 if (!(Test-Path $PROFILE)) {
     New-Item -ItemType File -Force -Path $PROFILE | Out-Null
 }
 
 Nuke-MediaProfile
 Write-Host "$CD [2/3] Profile dibersihkan.$CR"
+
+# =====================================================
+# TULIS BLOK BARU (100% literal single-quoted)
+# =====================================================
 
 $block = @'
 
@@ -185,7 +211,9 @@ Add-Content -Path $PROFILE -Value "`r`n$block"
 
 Write-Host "$CD [3/3] Perintah didaftarkan.$CR"
 
-
+# =====================================================
+# Aktifkan di sesi ini
+# =====================================================
 function Global:Media {
     & powershell -NoLogo -ExecutionPolicy Bypass -File "$env:USERPROFILE\.media-downloader\MediaDownloader.ps1" @args
 }
@@ -263,6 +291,9 @@ function Global:Remove-Media {
     Write-Host 'Profile sudah bersih. Aman buka PowerShell baru.' -ForegroundColor Gray
 }
 
+# =====================================================
+# VERIFIKASI: baca ulang profile, pastikan valid
+# =====================================================
 try {
     $null = [System.Management.Automation.Language.Parser]::ParseFile(
         $PROFILE,
