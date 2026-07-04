@@ -13,7 +13,7 @@
 $ErrorActionPreference = 'Stop'
 
 # ==== KONFIGURASI (GANTI DENGAN REPO KAMU) ====
-$RepoRawUrl = 'https://raw.githubusercontent.com/USERNAME/REPO/main/yt-dlp.ps1'
+$RepoRawUrl = 'https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/MediaDownloader.ps1'
 
 $ESC = [char]27
 $C_CYAN  = "$ESC[38;2;120;220;220m"
