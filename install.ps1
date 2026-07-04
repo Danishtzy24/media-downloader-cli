@@ -21,34 +21,6 @@ $CD = "$ESC[38;2;140;140;140m"
 $CE = "$ESC[38;2;240;120;120m"
 $CR = "$ESC[0m"
 
-function Out-Status {
-    param([string]$Text)
-    Write-Host "$CD $Text$CR"
-}
-
-function Out-Done {
-    param([string]$Text)
-    Write-Host "$CG $Text$CR"
-}
-
-function Out-Error {
-    param([string]$Text)
-    Write-Host "$CE $Text$CR"
-}
-
-function Wait-Dots {
-    param([int]$Seconds)
-    $start = Get-Date
-    $dots = @('.  ', '.. ', '...')
-    $i = 0
-    while (((Get-Date) - $start).TotalSeconds -lt $Seconds) {
-        Write-Host -NoNewline "`r$CD Menunggu$($dots[$i % 3])$CR"
-        Start-Sleep -Milliseconds 300
-        $i++
-    }
-    Write-Host "`r$CG Menunggu selesai $(' ' * 4)$CR"
-}
-
 Write-Host ""
 Write-Host "$CC Media Downloader v1.0 - Installer$CR"
 Write-Host "$CD ----------------------------------$CR"
@@ -91,149 +63,72 @@ if ($userPath -notlike "*$InstallDir*") {
     $env:Path += ";$InstallDir"
 }
 
-# === Bersihkan profile (inline, NO function call) ===
+# === Profile: hapus blok lama, tulis yang baru ===
 if (!(Test-Path $PROFILE)) {
     New-Item -ItemType File -Force -Path $PROFILE | Out-Null
 }
 
-Write-Host -NoNewline "$CD Membersihkan profile$CR"
+Write-Host -NoNewline "$CD Menyiapkan profile$CR"
 
-try {
-    $lines = @(Get-Content $PROFILE -ErrorAction SilentlyContinue)
-    $clean = @()
-    $inFunc = $false
-    $braceDepth = 0
-
-    foreach ($line in $lines) {
-        $t = $line.Trim()
-
-        if ($t -match 'MEDIA.?DOWNLOADER.?START' -or $t -match 'MediaDownloader.?START') { continue }
-        if ($t -match 'MEDIA.?DOWNLOADER.?END' -or $t -match 'MediaDownloader.?END') { continue }
-        if ($t -match '# Media Downloader') { continue }
-
-        if ($t -match '^function\s+(Global:)?(Media|Remove-Media|Uninstall-MediaDownloader|MediaDownloader)\b') {
-            $inFunc = $true
-            $braceDepth = 0
-        }
-
-        if ($inFunc) {
-            $braceDepth += ($t.ToCharArray() | Where-Object { $_ -eq '{' }).Count
-            $braceDepth -= ($t.ToCharArray() | Where-Object { $_ -eq '}' }).Count
-            if ($braceDepth -le 0) { $inFunc = $false }
-            continue
-        }
-
-        if ($t -match 'media-downloader' -and $t -notmatch '^#') { continue }
-        if ($t -match 'MediaDownloader' -and $t -notmatch '^#') { continue }
-        if ($t -match 'Sampai jumpa') { continue }
-
-        $clean += $line
-    }
-
-    while ($clean.Count -gt 0 -and $clean[-1].Trim() -eq '') {
-        $clean = $clean[0..($clean.Count - 2)]
-    }
-
-    if ($clean.Count -eq 0) {
-        Set-Content -Path $PROFILE -Value '' -Force
-    } else {
-        Set-Content -Path $PROFILE -Value $clean -Force
-    }
-
-    Write-Host "`r$CG Profile OK              $CR"
-} catch {
-    Write-Host "`r$CE Gagal bersihkan profile  $CR"
-    return
+# Hapus blok lama (semua versi) pakai regex
+$old = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
+if ($old) {
+    $old = $old -replace '(?s)# ==== MEDIA DOWNLOADER START ====.*?# ==== MEDIA DOWNLOADER END ====', ''
+    $old = $old -replace '(?s)# ==== MediaDownloader START ====.*?# ==== MediaDownloader END ====', ''
+    $old = $old -replace '(?s)# ==== Media Downloader START ====.*?# ==== Media Downloader END ====', ''
+    $old = $old -replace '(?s)if \(Test-Path \$env:USERPROFILE\\\.media-downloader\).*?# MD GUARD END', ''
+    Set-Content -Path $PROFILE -Value $old.TrimEnd() -Force
 }
 
-# === Tambah blok baru ===
+# Blok BARU: function hanya didefinisikan kalau folder ada.
+# Kalau folder dihapus (uninstall), PowerShell baru tidak definisiin apa-apa → zero error.
 $block = @'
 
 # ==== MEDIA DOWNLOADER START ====
-function Media {
-    & powershell -NoLogo -ExecutionPolicy Bypass -File "$env:USERPROFILE\.media-downloader\MediaDownloader.ps1" @args
-}
-
-function Remove-Media {
-    $dir = Join-Path $env:USERPROFILE '.media-downloader'
-
-    $c = Read-Host 'Hapus Media Downloader? (Y/N)'
-    if ($c -ne 'Y' -and $c -ne 'y') { return }
-
-    Write-Host 'Menghapus' -NoNewline -ForegroundColor Yellow
-
-    if (Test-Path $dir) {
-        Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path "$env:USERPROFILE\.media-downloader") {
+    function Media {
+        & powershell -NoLogo -ExecutionPolicy Bypass -File "$env:USERPROFILE\.media-downloader\MediaDownloader.ps1" @args
     }
-    Write-Host '.' -NoNewline -ForegroundColor Yellow
 
-    $p = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if ($p) {
-        $parts = $p -split ';' | Where-Object { $_ -and ($_ -notlike '*.media-downloader*') }
-        [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
+    function Remove-Media {
+        $dir = "$env:USERPROFILE\.media-downloader"
+
+        $c = Read-Host 'Hapus Media Downloader? (Y/N)'
+        if ($c -ne 'Y' -and $c -ne 'y') { return }
+
+        Write-Host 'Menghapus...' -NoNewline -ForegroundColor Yellow
+
+        # 1. Hapus folder
+        if (Test-Path $dir) {
+            Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host '.' -NoNewline -ForegroundColor Yellow
+
+        # 2. Bersihkan PATH
+        $p = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if ($p) {
+            $parts = $p -split ';' | Where-Object { $_ -and ($_ -notlike '*.media-downloader*') }
+            [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
+        }
+        Write-Host '.' -NoNewline -ForegroundColor Yellow
+
+        # 3. Hapus function dari sesi ini (tidak perlu edit profile!)
+        Remove-Item Function:\Media -ErrorAction SilentlyContinue
+        Remove-Item Function:\Remove-Media -ErrorAction SilentlyContinue
+        Write-Host '.' -ForegroundColor Yellow
+
+        Write-Host ''
+        Write-Host 'Media Downloader berhasil dihapus.' -ForegroundColor Green
+        Write-Host 'Buka PowerShell baru untuk memastikan bersih.' -ForegroundColor Gray
+        Write-Host ''
     }
-    Write-Host '.' -NoNewline -ForegroundColor Yellow
-
-    if (Test-Path $PROFILE) {
-        $lines = @(Get-Content $PROFILE -ErrorAction SilentlyContinue)
-        $keep = @()
-        $inFunc2 = $false
-        $depth = 0
-
-        foreach ($ln in $lines) {
-            $t = $ln.Trim()
-
-            if ($t -match 'MEDIA.?DOWNLOADER.?START' -or $t -match 'MediaDownloader.?START') { continue }
-            if ($t -match 'MEDIA.?DOWNLOADER.?END' -or $t -match 'MediaDownloader.?END') { continue }
-            if ($t -match '# Media Downloader') { continue }
-
-            if ($t -match '^function\s+(Global:)?(Media|Remove-Media|Uninstall-MediaDownloader|MediaDownloader)\b') {
-                $inFunc2 = $true
-                $depth = 0
-            }
-
-            if ($inFunc2) {
-                $depth += ($t.ToCharArray() | Where-Object { $_ -eq '{' }).Count
-                $depth -= ($t.ToCharArray() | Where-Object { $_ -eq '}' }).Count
-                if ($depth -le 0) { $inFunc2 = $false }
-                continue
-            }
-
-            if ($t -match 'media-downloader' -and $t -notmatch '^#') { continue }
-            if ($t -match 'MediaDownloader' -and $t -notmatch '^#') { continue }
-            if ($t -match 'Sampai jumpa') { continue }
-
-            $keep += $ln
-        }
-
-        while ($keep.Count -gt 0 -and $keep[-1].Trim() -eq '') {
-            $keep = $keep[0..($keep.Count - 2)]
-        }
-
-        if ($keep.Count -eq 0) {
-            Set-Content -Path $PROFILE -Value '' -Force
-        } else {
-            Set-Content -Path $PROFILE -Value $keep -Force
-        }
-    }
-    Write-Host '.' -ForegroundColor Yellow
-
-    Remove-Item Function:\Media -ErrorAction SilentlyContinue
-    Remove-Item Function:\Remove-Media -ErrorAction SilentlyContinue
-
-    Write-Host ''
-    Write-Host 'Media Downloader berhasil dihapus.' -ForegroundColor Green
-    Write-Host 'Profile bersih. Aman buka PowerShell baru.' -ForegroundColor Gray
-    Write-Host ''
 }
 # ==== MEDIA DOWNLOADER END ====
 '@
 
 Add-Content -Path $PROFILE -Value $block -Force
 
-Write-Host -NoNewline "$CD Mendaftarkan perintah$CR"
-Start-Sleep -Milliseconds 100
-Write-Host "`r$CG Perintah OK            $CR"
+Write-Host "`r$CG Profile OK              $CR"
 
 # === Aktifkan di sesi ini ===
 function Global:Media {
@@ -241,12 +136,12 @@ function Global:Media {
 }
 
 function Global:Remove-Media {
-    $dir = Join-Path $env:USERPROFILE '.media-downloader'
+    $dir = "$env:USERPROFILE\.media-downloader"
 
     $c = Read-Host 'Hapus Media Downloader? (Y/N)'
     if ($c -ne 'Y' -and $c -ne 'y') { return }
 
-    Write-Host 'Menghapus' -NoNewline -ForegroundColor Yellow
+    Write-Host 'Menghapus...' -NoNewline -ForegroundColor Yellow
 
     if (Test-Path $dir) {
         Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -260,58 +155,19 @@ function Global:Remove-Media {
     }
     Write-Host '.' -NoNewline -ForegroundColor Yellow
 
-    if (Test-Path $PROFILE) {
-        $lines = @(Get-Content $PROFILE -ErrorAction SilentlyContinue)
-        $keep = @()
-        $inFunc2 = $false
-        $depth = 0
-
-        foreach ($ln in $lines) {
-            $t = $ln.Trim()
-
-            if ($t -match 'MEDIA.?DOWNLOADER.?START' -or $t -match 'MediaDownloader.?START') { continue }
-            if ($t -match 'MEDIA.?DOWNLOADER.?END' -or $t -match 'MediaDownloader.?END') { continue }
-            if ($t -match '# Media Downloader') { continue }
-
-            if ($t -match '^function\s+(Global:)?(Media|Remove-Media|Uninstall-MediaDownloader|MediaDownloader)\b') {
-                $inFunc2 = $true
-                $depth = 0
-            }
-
-            if ($inFunc2) {
-                $depth += ($t.ToCharArray() | Where-Object { $_ -eq '{' }).Count
-                $depth -= ($t.ToCharArray() | Where-Object { $_ -eq '}' }).Count
-                if ($depth -le 0) { $inFunc2 = $false }
-                continue
-            }
-
-            if ($t -match 'media-downloader' -and $t -notmatch '^#') { continue }
-            if ($t -match 'MediaDownloader' -and $t -notmatch '^#') { continue }
-            if ($t -match 'Sampai jumpa') { continue }
-
-            $keep += $ln
-        }
-
-        while ($keep.Count -gt 0 -and $keep[-1].Trim() -eq '') {
-            $keep = $keep[0..($keep.Count - 2)]
-        }
-
-        if ($keep.Count -eq 0) {
-            Set-Content -Path $PROFILE -Value '' -Force
-        } else {
-            Set-Content -Path $PROFILE -Value $keep -Force
-        }
-    }
-    Write-Host '.' -ForegroundColor Yellow
-
     Remove-Item Function:\Media -ErrorAction SilentlyContinue
     Remove-Item Function:\Remove-Media -ErrorAction SilentlyContinue
+    Write-Host '.' -ForegroundColor Yellow
 
     Write-Host ''
     Write-Host 'Media Downloader berhasil dihapus.' -ForegroundColor Green
-    Write-Host 'Profile bersih. Aman buka PowerShell baru.' -ForegroundColor Gray
+    Write-Host 'Buka PowerShell baru untuk memastikan bersih.' -ForegroundColor Gray
     Write-Host ''
 }
+
+Write-Host -NoNewline "$CD Mendaftarkan perintah$CR"
+Start-Sleep -Milliseconds 100
+Write-Host "`r$CG Perintah OK            $CR"
 
 Write-Host ""
 Write-Host "$CG Instalasi selesai!$CR"
