@@ -92,21 +92,36 @@ $script:Platforms    = @(
     [PSCustomObject]@{ Name = 'Generic';   Hint = 'semua situs yang didukung';               Full = $false }
 )
 
-# Deteksi platform berdasar URL (untuk mode auto)
+# Deteksi platform berdasar URL
 function Detect-Platform {
     param([string]$Url)
-    if ($Url -match 'youtube\.com|youtu\.be') { return 'YouTube' }
-    if ($Url -match 'tiktok\.com')             { return 'TikTok' }
-    if ($Url -match 'x\.com|twitter\.com')     { return 'Twitter' }
-    if ($Url -match 'instagram\.com')          { return 'Instagram' }
-    if ($Url -match 'bilibili\.tv|bstation')   { return 'Bstation' }
+    if ($Url -match 'youtube\.com|youtu\.be')                 { return 'YouTube' }
+    if ($Url -match 'tiktok\.com')                             { return 'TikTok' }
+    if ($Url -match 'x\.com|twitter\.com')                     { return 'Twitter' }
+    if ($Url -match 'instagram\.com')                          { return 'Instagram' }
+    if ($Url -match 'bilibili\.tv|bstation\.tv|bilibili\.com') { return 'Bstation' }
     return 'Generic'
 }
 
 function Is-FullFeaturePlatform {
     param([string]$Url)
-    # Hanya YouTube yang mendukung pemilihan audio track & subtitle
     return ($Url -match 'youtube\.com|youtu\.be')
+}
+
+# Validasi: URL harus cocok dengan platform yang dipilih user (kecuali Generic)
+function Test-PlatformMatch {
+    param([string]$Url, [string]$SelectedPlatform)
+    if ($SelectedPlatform -eq 'Generic') { return $true }
+    $detected = Detect-Platform -Url $Url
+    return ($detected -eq $SelectedPlatform)
+}
+
+# Deteksi konten Instagram/Twitter tipe gambar (post foto)
+function Is-ImageUrl {
+    param([string]$Url)
+    if ($Url -match 'instagram\.com/p/')  { return $true }   # Instagram post foto
+    if ($Url -match 'instagram\.com/reel/') { return $false } # Reel = video
+    return $false
 }
 
 $defaultDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
@@ -442,7 +457,7 @@ function Invoke-Download {
         [int]$BarRow,
         [int]$StatsRow,
         [string]$Label = '',
-        [string]$OutputFormat = 'mp4'   # 'mp4' atau 'mp3'
+        [string]$OutputFormat = 'mp4'   # 'mp4' atau 'mp3' atau 'auto'
     )
 
     $outputPath = Join-Path $script:SaveDir "%(title)s.%(ext)s"
@@ -454,22 +469,66 @@ function Invoke-Download {
     $ytArgs.Add("--no-colors")
     $ytArgs.Add("--no-mtime")
     $ytArgs.Add("--no-playlist")
+    $ytArgs.Add("--ignore-config")
     $ytArgs.Add("--extractor-args"); $ytArgs.Add("youtube:player_client=all")
     $ytArgs.Add("--progress-template")
     $ytArgs.Add("download:PROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s")
 
+    # === Cookies untuk Instagram/TikTok (auto detect browser, dicache) ===
+    $needsCookies = ($URL -match 'instagram\.com|tiktok\.com|x\.com|twitter\.com')
+    if ($needsCookies) {
+        if ($null -eq $script:CookieBrowser) {
+            # Cek browser sekali saja per sesi
+            $script:CookieBrowser = ''
+            $browsers = @('chrome','edge','firefox','brave','opera')
+            foreach ($b in $browsers) {
+                $chromeDir = switch ($b) {
+                    'chrome' { "$env:LOCALAPPDATA\Google\Chrome\User Data" }
+                    'edge'   { "$env:LOCALAPPDATA\Microsoft\Edge\User Data" }
+                    'brave'  { "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data" }
+                    'opera'  { "$env:APPDATA\Opera Software\Opera Stable" }
+                    'firefox'{ "$env:APPDATA\Mozilla\Firefox\Profiles" }
+                }
+                if ($chromeDir -and (Test-Path $chromeDir)) {
+                    $script:CookieBrowser = $b
+                    break
+                }
+            }
+        }
+        if ($script:CookieBrowser) {
+            $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($script:CookieBrowser)
+        }
+    }
+
     if ($OutputFormat -eq 'mp3') {
-        # AUDIO ONLY MODE
-        $ytArgs.Add("-f"); $ytArgs.Add("bestaudio/best")
+        # === REAL MP3 MODE (via ffmpeg re-encode, bukan cuma rename) ===
+        $ytArgs.Add("-f"); $ytArgs.Add("bestaudio[ext=m4a]/bestaudio/best")
         $ytArgs.Add("--extract-audio")
         $ytArgs.Add("--audio-format"); $ytArgs.Add("mp3")
-        $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")   # kualitas terbaik
+        $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")   # VBR ~245 kbps
         $ytArgs.Add("--embed-thumbnail")
         $ytArgs.Add("--add-metadata")
-    } else {
-        # VIDEO MODE
+        # paksa ffmpeg pakai libmp3lame supaya benar-benar MP3 valid
+        $ytArgs.Add("--postprocessor-args"); $ytArgs.Add("FFmpegExtractAudio:-c:a libmp3lame -q:a 0")
+    }
+    elseif ($OutputFormat -eq 'auto') {
+        # === GENERIC AUTO MODE (video/image/audio apapun) ===
+        # yt-dlp otomatis pilih format terbaik, gambar juga di-download apa adanya
+        $ytArgs.Add("-f"); $ytArgs.Add("bv*[vcodec^=avc1]+ba/bv*+ba/b/bestvideo+bestaudio/best")
         $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
-        $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
+        $ytArgs.Add("--write-thumbnail")   # jaga-jaga kalau content = image
+        $ytArgs.Add("--convert-thumbnails"); $ytArgs.Add("jpg")
+    }
+    else {
+        # === MP4 MODE (video, prioritas AVC/H.264) ===
+        $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
+        if ($FormatString) {
+            $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
+        } else {
+            $ytArgs.Add("-f"); $ytArgs.Add("bv*[vcodec^=avc1]+ba/bv*+ba/b/best")
+        }
+        # Pastikan output codec H.264 + AAC (kompatibel semua device)
+        $ytArgs.Add("--postprocessor-args"); $ytArgs.Add("VideoConvertor:-c:v libx264 -c:a aac -movflags +faststart")
 
         if ($SubLang) {
             $ytArgs.Add("--write-subs"); $ytArgs.Add("--write-auto-subs")
@@ -1082,6 +1141,25 @@ $script:FormatOptions = @(
 # SCREEN 4a: DOWNLOAD SINGLE
 # ============================================
 
+function Show-AutoDownloadScreen {
+    param([string]$URL)
+    Clear-Screen
+    Draw-Footer
+
+    $h = Get-TermHeight
+    $centerRow = [Math]::Max(5, [Math]::Floor($h / 2))
+
+    $title = if ($script:VideoInfo -and $script:VideoInfo.title) { [string]$script:VideoInfo.title } else { 'Content' }
+    $m = Get-PanelMetrics -MaxWidth 76
+    $titleText = Limit-Text -Text $title -Max ($m.Inner - 1)
+
+    Write-PanelLine -Row ($centerRow - 4) -Col $m.Col -Width $m.Width -Text "${FG_CYAN}Downloading (auto mode)...$RESET"
+    Write-PanelLine -Row ($centerRow - 3) -Col $m.Col -Width $m.Width -Text "$FG_WHITE$titleText$RESET"
+
+    $outFmt = if ($script:Settings.Format -eq 'mp3') { 'mp3' } else { 'auto' }
+    return Invoke-Download -URL $URL -FormatString '' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat $outFmt
+}
+
 function Show-DownloadScreen {
     param([string]$URL, [bool]$FullFeature = $true)
     Clear-Screen
@@ -1302,6 +1380,46 @@ function Show-ErrorScreen {
     }
 }
 
+# Layar khusus untuk platform mismatch (pilih X tapi paste link Y)
+function Show-PlatformMismatchScreen {
+    param([string]$Selected, [string]$Detected)
+    Clear-Screen
+    Draw-Footer
+
+    $h = Get-TermHeight
+    $centerRow = [Math]::Floor($h / 2) - 2
+
+    Write-Center -Row $centerRow -Text "$FG_ORANGE$BOLD  Platform Tidak Valid  $RESET"
+    Write-Center -Row ($centerRow + 2) -Text "$FG_GRAY Kamu memilih platform: $FG_WHITE$Selected$RESET"
+    Write-Center -Row ($centerRow + 3) -Text "$FG_GRAY Tapi URL terdeteksi:   $FG_YELLOW$Detected$RESET"
+    Write-Center -Row ($centerRow + 5) -Text "$FG_DIM Ganti platform di layar awal, atau pilih 'Generic'.$RESET"
+    Write-Center -Row ($centerRow + 8) -Text "$FG_DIM tekan tombol apapun untuk kembali$RESET"
+    [void][Console]::ReadKey($true)
+}
+
+# Layar khusus untuk konten diblokir/tidak bisa diakses (setelah 2x gagal)
+function Show-BlockedScreen {
+    param([string]$Platform)
+    Clear-Screen
+    Draw-Footer
+
+    $h = Get-TermHeight
+    $centerRow = [Math]::Floor($h / 2) - 3
+
+    Write-Center -Row $centerRow -Text "$FG_RED$BOLD  Blocked by Vendor  $RESET"
+    Write-Center -Row ($centerRow + 2) -Text "$FG_GRAY Platform $FG_WHITE$Platform$FG_GRAY menolak akses ke konten ini.$RESET"
+
+    $m = Get-PanelMetrics -MaxWidth 70
+    Write-PanelLine -Row ($centerRow + 4) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Kemungkinan penyebab:$RESET" -Accent $FG_RED
+    Write-PanelLine -Row ($centerRow + 5) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  Konten private (butuh login)"
+    Write-PanelLine -Row ($centerRow + 6) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  Region locked / geo-restricted"
+    Write-PanelLine -Row ($centerRow + 7) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  Akun butuh cookies dari browser"
+    Write-PanelLine -Row ($centerRow + 8) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  URL invalid / video sudah dihapus"
+
+    Write-Center -Row ($centerRow + 11) -Text "$FG_DIM tekan tombol apapun untuk kembali$RESET"
+    [void][Console]::ReadKey($true)
+}
+
 # ============================================
 # DEPENDENCY CHECK (AUTO INSTALL VIA WINGET)
 # ============================================
@@ -1335,19 +1453,41 @@ try {
     Load-Settings
     if (-not (Test-Dependencies)) { exit }
 
+    $script:FailCount = @{}   # track kegagalan per URL untuk trigger BlockedScreen
+
     $running = $true
     while ($running) {
         $url = Show-WelcomeScreen
         if ($null -eq $url) { $running = $false; break }
         if ($url -eq 'RELOAD') { continue }   # habis dari settings
 
-        # Fetch flat (deteksi playlist), bisa di-cancel
+        # === VALIDASI PLATFORM MISMATCH ===
+        $selectedPlatform = $script:Platforms[$script:PlatformIdx].Name
+        if (-not (Test-PlatformMatch -Url $url -SelectedPlatform $selectedPlatform)) {
+            $detected = Detect-Platform -Url $url
+            Show-PlatformMismatchScreen -Selected $selectedPlatform -Detected $detected
+            continue
+        }
+
+        # === Fetch flat ===
         $info = Invoke-FetchJson -URL $url -Message 'Mengambil informasi...' -Flat $true
         if (-not $info) {
-            $retry = Show-ErrorScreen -Message "Gagal / dibatalkan. Cek URL atau koneksi."
+            # Increment fail count
+            if (-not $script:FailCount.ContainsKey($url)) { $script:FailCount[$url] = 0 }
+            $script:FailCount[$url]++
+
+            if ($script:FailCount[$url] -ge 2) {
+                Show-BlockedScreen -Platform $selectedPlatform
+                $script:FailCount.Remove($url)
+                continue
+            }
+
+            $retry = Show-ErrorScreen -Message "Gagal mengambil info. Cek URL atau koneksi."
             if (-not $retry) { $running = $false; break }
             continue
         }
+        # Reset counter kalau berhasil
+        if ($script:FailCount.ContainsKey($url)) { $script:FailCount.Remove($url) }
 
         $isPlaylist = ($info._type -eq 'playlist') -and ($info.entries) -and (@($info.entries).Count -gt 1)
 
@@ -1376,19 +1516,52 @@ try {
         $script:VideoInfo = $info
         Parse-Formats -Info $info
 
+        $fullFeature = Is-FullFeaturePlatform -Url $url
+
         if ($script:Resolutions.Count -eq 0) {
+            # Non-YouTube tanpa video streams -> mungkin gambar/audio only.
+            # Untuk platform simple, langsung download mode auto (bukan error)
+            if (-not $fullFeature) {
+                $result = Show-AutoDownloadScreen -URL $url
+                $errMsg = ""
+                if ($result -eq 'fail' -and $script:LastError) {
+                    $errMsg = (($script:LastError -split "`n") | Where-Object { $_ -match 'ERROR' } | Select-Object -First 1)
+                }
+                if ($result -eq 'fail') {
+                    if (-not $script:FailCount.ContainsKey($url)) { $script:FailCount[$url] = 0 }
+                    $script:FailCount[$url]++
+                    if ($script:FailCount[$url] -ge 2) {
+                        Show-BlockedScreen -Platform $selectedPlatform
+                        $script:FailCount.Remove($url)
+                        continue
+                    }
+                }
+                $again = Show-DoneScreen -Result $result -Message $errMsg
+                if (-not $again) { $running = $false }
+                continue
+            }
             $retry = Show-ErrorScreen -Message "Tidak ada format video tersedia"
             if (-not $retry) { $running = $false; break }
             continue
         }
 
-        # Deteksi apakah platform mendukung full feature (audio track & subtitle)
-        $fullFeature = Is-FullFeaturePlatform -Url $url
-
         $confirm = Show-FormatScreen -FullFeature $fullFeature
         if (-not $confirm) { continue }
 
         $result = Show-DownloadScreen -URL $url -FullFeature $fullFeature
+
+        # Track kegagalan untuk trigger BlockedScreen setelah 2x
+        if ($result -eq 'fail') {
+            if (-not $script:FailCount.ContainsKey($url)) { $script:FailCount[$url] = 0 }
+            $script:FailCount[$url]++
+            if ($script:FailCount[$url] -ge 2) {
+                Show-BlockedScreen -Platform $selectedPlatform
+                $script:FailCount.Remove($url)
+                continue
+            }
+        } else {
+            if ($script:FailCount.ContainsKey($url)) { $script:FailCount.Remove($url) }
+        }
 
         $errMsg = ""
         if ($result -eq 'fail' -and $script:LastError) {
