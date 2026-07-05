@@ -1,4 +1,16 @@
-
+<#
+.SYNOPSIS
+    Media Downloader v1.0 - Terminal UI
+.DESCRIPTION
+    Downloader universal untuk YouTube / TikTok / Twitter / Instagram / Bstation / Gambar.
+    - UI statis anti-kedip
+    - Progress bar real-time
+    - Playlist checklist
+    - MP4 / MP3 / Image
+    - Auto-update dari GitHub
+    - Auto-cookies dari browser
+    - Smart blocklist (bedakan error server vs private/cookies)
+#>
 
 $script:AppVersion = '1.0'
 
@@ -151,6 +163,10 @@ function Is-FullFeaturePlatform {
     return ($Url -match 'youtube\.com|youtu\.be')
 }
 
+# --- Config dir dipakai oleh settings + blocklist ---
+$script:ConfigDir = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE '.media-downloader' } else { Join-Path $HOME '.media-downloader' }
+$script:SettingsPath = Join-Path $script:ConfigDir 'settings.json'
+
 # =====================================================
 # BLOCKLIST PERMANEN (per platform)
 # Kalau download gagal berulang, blok platform-nya
@@ -236,9 +252,6 @@ if (-not (Test-Path $defaultDir)) { $defaultDir = if ($PSScriptRoot) { $PSScript
 $script:SaveDir = $defaultDir
 
 # --- Settings (persisten) ---
-$script:ConfigDir    = Join-Path $env:USERPROFILE '.media-downloader'
-$script:SettingsPath = Join-Path $script:ConfigDir 'settings.json'
-
 # AudioLang: 'original' atau kode bahasa ('id','en','ar',...)
 # MaxRes: 0 = best, atau 2160/1440/1080/720/480/360
 $script:Settings = [PSCustomObject]@{
