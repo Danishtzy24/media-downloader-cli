@@ -1,17 +1,3 @@
-<#
-.SYNOPSIS
-    Media Downloader v1.0 - Terminal UI
-.DESCRIPTION
-    Downloader universal untuk YouTube / TikTok / Twitter / Instagram / Bstation / Gambar.
-    - UI statis anti-kedip
-    - Progress bar real-time
-    - Playlist checklist
-    - MP4 / MP3 / Image
-    - Auto-update dari GitHub
-    - Auto-cookies dari browser
-    - Smart blocklist (bedakan error server vs private/cookies)
-#>
-
 $script:AppVersion = '1.0'
 
 $ErrorActionPreference = 'Stop'
