@@ -92,36 +92,21 @@ $script:Platforms    = @(
     [PSCustomObject]@{ Name = 'Generic';   Hint = 'semua situs yang didukung';               Full = $false }
 )
 
-# Deteksi platform berdasar URL
+# Deteksi platform berdasar URL (untuk mode auto)
 function Detect-Platform {
     param([string]$Url)
-    if ($Url -match 'youtube\.com|youtu\.be')                 { return 'YouTube' }
-    if ($Url -match 'tiktok\.com')                             { return 'TikTok' }
-    if ($Url -match 'x\.com|twitter\.com')                     { return 'Twitter' }
-    if ($Url -match 'instagram\.com')                          { return 'Instagram' }
-    if ($Url -match 'bilibili\.tv|bstation\.tv|bilibili\.com') { return 'Bstation' }
+    if ($Url -match 'youtube\.com|youtu\.be') { return 'YouTube' }
+    if ($Url -match 'tiktok\.com')             { return 'TikTok' }
+    if ($Url -match 'x\.com|twitter\.com')     { return 'Twitter' }
+    if ($Url -match 'instagram\.com')          { return 'Instagram' }
+    if ($Url -match 'bilibili\.tv|bstation')   { return 'Bstation' }
     return 'Generic'
 }
 
 function Is-FullFeaturePlatform {
     param([string]$Url)
+    # Hanya YouTube yang mendukung pemilihan audio track & subtitle
     return ($Url -match 'youtube\.com|youtu\.be')
-}
-
-# Validasi: URL harus cocok dengan platform yang dipilih user (kecuali Generic)
-function Test-PlatformMatch {
-    param([string]$Url, [string]$SelectedPlatform)
-    if ($SelectedPlatform -eq 'Generic') { return $true }
-    $detected = Detect-Platform -Url $Url
-    return ($detected -eq $SelectedPlatform)
-}
-
-# Deteksi konten Instagram/Twitter tipe gambar (post foto)
-function Is-ImageUrl {
-    param([string]$Url)
-    if ($Url -match 'instagram\.com/p/')  { return $true }   # Instagram post foto
-    if ($Url -match 'instagram\.com/reel/') { return $false } # Reel = video
-    return $false
 }
 
 $defaultDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
@@ -139,6 +124,48 @@ $script:Settings = [PSCustomObject]@{
     MaxRes    = 0
     SaveDir   = $defaultDir
     Format    = 'mp4'   # 'mp4' atau 'mp3'
+    Cookies   = 'auto'  # 'off' | 'auto' | 'chrome' | 'edge' | 'firefox' | 'brave' | 'opera' | 'vivaldi'
+}
+
+# Opsi cookies
+$script:CookieOptions = @(
+    @{ Code = 'off';     Label = 'Off (tanpa cookie)' }
+    @{ Code = 'auto';    Label = 'Auto-detect browser' }
+    @{ Code = 'chrome';  Label = 'Chrome' }
+    @{ Code = 'edge';    Label = 'Edge' }
+    @{ Code = 'firefox'; Label = 'Firefox' }
+    @{ Code = 'brave';   Label = 'Brave' }
+    @{ Code = 'opera';   Label = 'Opera' }
+    @{ Code = 'vivaldi'; Label = 'Vivaldi' }
+)
+
+# Deteksi browser terpasang -> return kode browser untuk --cookies-from-browser
+function Detect-Browser {
+    $candidates = @(
+        @{ Code = 'chrome';  Path = "$env:LOCALAPPDATA\Google\Chrome\User Data" }
+        @{ Code = 'edge';    Path = "$env:LOCALAPPDATA\Microsoft\Edge\User Data" }
+        @{ Code = 'brave';   Path = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data" }
+        @{ Code = 'firefox'; Path = "$env:APPDATA\Mozilla\Firefox\Profiles" }
+        @{ Code = 'opera';   Path = "$env:APPDATA\Opera Software\Opera Stable" }
+        @{ Code = 'vivaldi'; Path = "$env:LOCALAPPDATA\Vivaldi\User Data" }
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c.Path) { return $c.Code }
+    }
+    return $null
+}
+
+function Get-CookieBrowserForYtdlp {
+    $mode = [string]$script:Settings.Cookies
+    if ($mode -eq 'off') { return $null }
+    if ($mode -eq 'auto') { return (Detect-Browser) }
+    return $mode
+}
+
+function Get-CookieLabel {
+    param([string]$Code)
+    foreach ($o in $script:CookieOptions) { if ($o.Code -eq $Code) { return $o.Label } }
+    return $Code
 }
 
 function Ensure-Dir {
@@ -155,6 +182,7 @@ function Load-Settings {
             if ($j.AudioLang) { $script:Settings.AudioLang = [string]$j.AudioLang }
             if ($null -ne $j.MaxRes) { $script:Settings.MaxRes = [int]$j.MaxRes }
             if ($j.Format -and ($j.Format -eq 'mp3' -or $j.Format -eq 'mp4')) { $script:Settings.Format = [string]$j.Format }
+            if ($j.Cookies) { $script:Settings.Cookies = [string]$j.Cookies }
             if ($j.SaveDir) {
                 $d = Ensure-Dir -Path ([string]$j.SaveDir)
                 $script:Settings.SaveDir = $d
@@ -457,7 +485,7 @@ function Invoke-Download {
         [int]$BarRow,
         [int]$StatsRow,
         [string]$Label = '',
-        [string]$OutputFormat = 'mp4'   # 'mp4' atau 'mp3' atau 'auto'
+        [string]$OutputFormat = 'mp4'   # 'mp4' atau 'mp3'
     )
 
     $outputPath = Join-Path $script:SaveDir "%(title)s.%(ext)s"
@@ -469,66 +497,26 @@ function Invoke-Download {
     $ytArgs.Add("--no-colors")
     $ytArgs.Add("--no-mtime")
     $ytArgs.Add("--no-playlist")
-    $ytArgs.Add("--ignore-config")
     $ytArgs.Add("--extractor-args"); $ytArgs.Add("youtube:player_client=all")
     $ytArgs.Add("--progress-template")
     $ytArgs.Add("download:PROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s")
 
-    # === Cookies untuk Instagram/TikTok (auto detect browser, dicache) ===
-    $needsCookies = ($URL -match 'instagram\.com|tiktok\.com|x\.com|twitter\.com')
-    if ($needsCookies) {
-        if ($null -eq $script:CookieBrowser) {
-            # Cek browser sekali saja per sesi
-            $script:CookieBrowser = ''
-            $browsers = @('chrome','edge','firefox','brave','opera')
-            foreach ($b in $browsers) {
-                $chromeDir = switch ($b) {
-                    'chrome' { "$env:LOCALAPPDATA\Google\Chrome\User Data" }
-                    'edge'   { "$env:LOCALAPPDATA\Microsoft\Edge\User Data" }
-                    'brave'  { "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data" }
-                    'opera'  { "$env:APPDATA\Opera Software\Opera Stable" }
-                    'firefox'{ "$env:APPDATA\Mozilla\Firefox\Profiles" }
-                }
-                if ($chromeDir -and (Test-Path $chromeDir)) {
-                    $script:CookieBrowser = $b
-                    break
-                }
-            }
-        }
-        if ($script:CookieBrowser) {
-            $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($script:CookieBrowser)
-        }
-    }
+    # Auto cookies (untuk video login-required / premium / private)
+    $ck = Get-CookieBrowserForYtdlp
+    if ($ck) { $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($ck) }
 
     if ($OutputFormat -eq 'mp3') {
-        # === REAL MP3 MODE (via ffmpeg re-encode, bukan cuma rename) ===
-        $ytArgs.Add("-f"); $ytArgs.Add("bestaudio[ext=m4a]/bestaudio/best")
+        # AUDIO ONLY MODE
+        $ytArgs.Add("-f"); $ytArgs.Add("bestaudio/best")
         $ytArgs.Add("--extract-audio")
         $ytArgs.Add("--audio-format"); $ytArgs.Add("mp3")
-        $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")   # VBR ~245 kbps
+        $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")   # kualitas terbaik
         $ytArgs.Add("--embed-thumbnail")
         $ytArgs.Add("--add-metadata")
-        # paksa ffmpeg pakai libmp3lame supaya benar-benar MP3 valid
-        $ytArgs.Add("--postprocessor-args"); $ytArgs.Add("FFmpegExtractAudio:-c:a libmp3lame -q:a 0")
-    }
-    elseif ($OutputFormat -eq 'auto') {
-        # === GENERIC AUTO MODE (video/image/audio apapun) ===
-        # yt-dlp otomatis pilih format terbaik, gambar juga di-download apa adanya
-        $ytArgs.Add("-f"); $ytArgs.Add("bv*[vcodec^=avc1]+ba/bv*+ba/b/bestvideo+bestaudio/best")
+    } else {
+        # VIDEO MODE
         $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
-        $ytArgs.Add("--write-thumbnail")   # jaga-jaga kalau content = image
-        $ytArgs.Add("--convert-thumbnails"); $ytArgs.Add("jpg")
-    }
-    else {
-        # === MP4 MODE (video, prioritas AVC/H.264) ===
-        $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
-        if ($FormatString) {
-            $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
-        } else {
-            $ytArgs.Add("-f"); $ytArgs.Add("bv*[vcodec^=avc1]+ba/bv*+ba/b/best")
-        }
-        # Pastikan output codec H.264 + AAC (kompatibel semua device)
-        $ytArgs.Add("--postprocessor-args"); $ytArgs.Add("VideoConvertor:-c:v libx264 -c:a aac -movflags +faststart")
+        $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
 
         if ($SubLang) {
             $ytArgs.Add("--write-subs"); $ytArgs.Add("--write-auto-subs")
@@ -836,9 +824,13 @@ function Show-SettingsScreen {
     }
     $formatIdx = if ($script:Settings.Format -eq 'mp3') { 1 } else { 0 }
     $formatOptions = @('MP4 (Video + Audio)', 'MP3 (Audio Only)')
+    $cookieIdx = 0
+    for ($i = 0; $i -lt $script:CookieOptions.Count; $i++) {
+        if ($script:CookieOptions[$i].Code -eq $script:Settings.Cookies) { $cookieIdx = $i; break }
+    }
     $folderBuf = $script:Settings.SaveDir
 
-    $sel = 0          # 0=format, 1=audio, 2=res, 3=folder
+    $sel = 0          # 0=format, 1=audio, 2=res, 3=cookies, 4=folder
     $editMode = $false
     $dirty = $true
 
@@ -856,7 +848,8 @@ function Show-SettingsScreen {
                 else { $fText = Limit-Text -Text $fText -Max $fMax }
             }
 
-            for ($r = 0; $r -lt 4; $r++) {
+            $ckLabel = $script:CookieOptions[$cookieIdx].Label
+            for ($r = 0; $r -lt 5; $r++) {
                 $row = $top + 2 + $r
                 $isSel = ($sel -eq $r)
                 $accent = if ($isSel) { $FG_BLUE } else { $FG_DIM }
@@ -867,7 +860,8 @@ function Show-SettingsScreen {
                     0 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Format          $FG_DIM$GL_LEFT$RESET $tcolor$bold$fmtLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
                     1 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Dubbing audio   $FG_DIM$GL_LEFT$RESET $tcolor$bold$aLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
                     2 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Resolusi maks   $FG_DIM$GL_LEFT$RESET $tcolor$bold$rLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
-                    3 {
+                    3 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Auto cookies    $FG_DIM$GL_LEFT$RESET $tcolor$bold$ckLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
+                    4 {
                         $cursorGlyph = if ($editMode -and $isSel) { "$FG_BLUE$GL_FULL$RESET" } else { '' }
                         $fcolor = if ($editMode -and $isSel) { $FG_WHITE } else { $tcolor }
                         Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Folder          $fcolor$bold$fText$RESET$cursorGlyph" -Accent $accent
@@ -879,7 +873,7 @@ function Show-SettingsScreen {
 
         $key = [Console]::ReadKey($true)
 
-        if ($editMode -and $sel -eq 3) {
+        if ($editMode -and $sel -eq 4) {
             if ($key.Key -eq 'Enter') { $editMode = $false; $dirty = $true }
             elseif ($key.Key -eq 'Escape') { $editMode = $false; $folderBuf = $script:Settings.SaveDir; $dirty = $true }
             elseif ($key.Key -eq 'Backspace') { if ($folderBuf.Length -gt 0) { $folderBuf = $folderBuf.Substring(0, $folderBuf.Length - 1); $dirty = $true } }
@@ -896,13 +890,14 @@ function Show-SettingsScreen {
 
         $dirty = $true
         switch ($key.Key) {
-            'UpArrow'   { $sel = ($sel + 3) % 4 }
-            'DownArrow' { $sel = ($sel + 1) % 4 }
+            'UpArrow'   { $sel = ($sel + 4) % 5 }
+            'DownArrow' { $sel = ($sel + 1) % 5 }
             'LeftArrow' {
                 switch ($sel) {
                     0 { $formatIdx = ($formatIdx + 1) % 2 }
                     1 { $audioIdx = ($audioIdx + $script:AudioLangOptions.Count - 1) % $script:AudioLangOptions.Count }
                     2 { $resIdx = ($resIdx + $script:ResOptions.Count - 1) % $script:ResOptions.Count }
+                    3 { $cookieIdx = ($cookieIdx + $script:CookieOptions.Count - 1) % $script:CookieOptions.Count }
                 }
             }
             'RightArrow' {
@@ -910,14 +905,16 @@ function Show-SettingsScreen {
                     0 { $formatIdx = ($formatIdx + 1) % 2 }
                     1 { $audioIdx = ($audioIdx + 1) % $script:AudioLangOptions.Count }
                     2 { $resIdx = ($resIdx + 1) % $script:ResOptions.Count }
+                    3 { $cookieIdx = ($cookieIdx + 1) % $script:CookieOptions.Count }
                 }
             }
             'Enter' {
-                if ($sel -eq 3) { $editMode = $true; $dirty = $true }
+                if ($sel -eq 4) { $editMode = $true; $dirty = $true }
                 else {
                     $script:Settings.Format = if ($formatIdx -eq 1) { 'mp3' } else { 'mp4' }
                     $script:Settings.AudioLang = $script:AudioLangOptions[$audioIdx].Code
                     $script:Settings.MaxRes = $script:ResOptions[$resIdx]
+                    $script:Settings.Cookies = $script:CookieOptions[$cookieIdx].Code
                     $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
                     $script:SaveDir = $script:Settings.SaveDir
                     Save-Settings
@@ -928,6 +925,7 @@ function Show-SettingsScreen {
                 $script:Settings.Format = if ($formatIdx -eq 1) { 'mp3' } else { 'mp4' }
                 $script:Settings.AudioLang = $script:AudioLangOptions[$audioIdx].Code
                 $script:Settings.MaxRes = $script:ResOptions[$resIdx]
+                $script:Settings.Cookies = $script:CookieOptions[$cookieIdx].Code
                 $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
                 $script:SaveDir = $script:Settings.SaveDir
                 Save-Settings
@@ -952,13 +950,18 @@ function Invoke-FetchJson {
     $centerRow = [Math]::Floor($h / 2)
 
     $flatArg = if ($Flat) { '--flat-playlist' } else { '--no-playlist' }
+    $ck = Get-CookieBrowserForYtdlp
     $job = Start-Job -ScriptBlock {
-        param($u, $fa)
+        param($u, $fa, $ck)
         try {
-            $json = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>$null
+            if ($ck) {
+                $json = & yt-dlp -J $fa --cookies-from-browser $ck --extractor-args "youtube:player_client=all" --no-warnings $u 2>$null
+            } else {
+                $json = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>$null
+            }
             return @{ Success = $true; Data = ($json -join '') }
         } catch { return @{ Success = $false; Error = $_.ToString() } }
-    } -ArgumentList $URL, $flatArg
+    } -ArgumentList $URL, $flatArg, $ck
 
     $shortUrl = Limit-Text -Text $URL -Max ([Math]::Max(20, (Get-TermWidth) - 8))
     Write-Center -Row ($centerRow + 2) -Text "$FG_DIM$shortUrl$RESET"
@@ -1140,25 +1143,6 @@ $script:FormatOptions = @(
 # ============================================
 # SCREEN 4a: DOWNLOAD SINGLE
 # ============================================
-
-function Show-AutoDownloadScreen {
-    param([string]$URL)
-    Clear-Screen
-    Draw-Footer
-
-    $h = Get-TermHeight
-    $centerRow = [Math]::Max(5, [Math]::Floor($h / 2))
-
-    $title = if ($script:VideoInfo -and $script:VideoInfo.title) { [string]$script:VideoInfo.title } else { 'Content' }
-    $m = Get-PanelMetrics -MaxWidth 76
-    $titleText = Limit-Text -Text $title -Max ($m.Inner - 1)
-
-    Write-PanelLine -Row ($centerRow - 4) -Col $m.Col -Width $m.Width -Text "${FG_CYAN}Downloading (auto mode)...$RESET"
-    Write-PanelLine -Row ($centerRow - 3) -Col $m.Col -Width $m.Width -Text "$FG_WHITE$titleText$RESET"
-
-    $outFmt = if ($script:Settings.Format -eq 'mp3') { 'mp3' } else { 'auto' }
-    return Invoke-Download -URL $URL -FormatString '' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat $outFmt
-}
 
 function Show-DownloadScreen {
     param([string]$URL, [bool]$FullFeature = $true)
@@ -1380,46 +1364,6 @@ function Show-ErrorScreen {
     }
 }
 
-# Layar khusus untuk platform mismatch (pilih X tapi paste link Y)
-function Show-PlatformMismatchScreen {
-    param([string]$Selected, [string]$Detected)
-    Clear-Screen
-    Draw-Footer
-
-    $h = Get-TermHeight
-    $centerRow = [Math]::Floor($h / 2) - 2
-
-    Write-Center -Row $centerRow -Text "$FG_ORANGE$BOLD  Platform Tidak Valid  $RESET"
-    Write-Center -Row ($centerRow + 2) -Text "$FG_GRAY Kamu memilih platform: $FG_WHITE$Selected$RESET"
-    Write-Center -Row ($centerRow + 3) -Text "$FG_GRAY Tapi URL terdeteksi:   $FG_YELLOW$Detected$RESET"
-    Write-Center -Row ($centerRow + 5) -Text "$FG_DIM Ganti platform di layar awal, atau pilih 'Generic'.$RESET"
-    Write-Center -Row ($centerRow + 8) -Text "$FG_DIM tekan tombol apapun untuk kembali$RESET"
-    [void][Console]::ReadKey($true)
-}
-
-# Layar khusus untuk konten diblokir/tidak bisa diakses (setelah 2x gagal)
-function Show-BlockedScreen {
-    param([string]$Platform)
-    Clear-Screen
-    Draw-Footer
-
-    $h = Get-TermHeight
-    $centerRow = [Math]::Floor($h / 2) - 3
-
-    Write-Center -Row $centerRow -Text "$FG_RED$BOLD  Blocked by Vendor  $RESET"
-    Write-Center -Row ($centerRow + 2) -Text "$FG_GRAY Platform $FG_WHITE$Platform$FG_GRAY menolak akses ke konten ini.$RESET"
-
-    $m = Get-PanelMetrics -MaxWidth 70
-    Write-PanelLine -Row ($centerRow + 4) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Kemungkinan penyebab:$RESET" -Accent $FG_RED
-    Write-PanelLine -Row ($centerRow + 5) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  Konten private (butuh login)"
-    Write-PanelLine -Row ($centerRow + 6) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  Region locked / geo-restricted"
-    Write-PanelLine -Row ($centerRow + 7) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  Akun butuh cookies dari browser"
-    Write-PanelLine -Row ($centerRow + 8) -Col $m.Col -Width $m.Width -Text "  $FG_DIM $GL_BULLET$RESET  URL invalid / video sudah dihapus"
-
-    Write-Center -Row ($centerRow + 11) -Text "$FG_DIM tekan tombol apapun untuk kembali$RESET"
-    [void][Console]::ReadKey($true)
-}
-
 # ============================================
 # DEPENDENCY CHECK (AUTO INSTALL VIA WINGET)
 # ============================================
@@ -1453,41 +1397,19 @@ try {
     Load-Settings
     if (-not (Test-Dependencies)) { exit }
 
-    $script:FailCount = @{}   # track kegagalan per URL untuk trigger BlockedScreen
-
     $running = $true
     while ($running) {
         $url = Show-WelcomeScreen
         if ($null -eq $url) { $running = $false; break }
         if ($url -eq 'RELOAD') { continue }   # habis dari settings
 
-        # === VALIDASI PLATFORM MISMATCH ===
-        $selectedPlatform = $script:Platforms[$script:PlatformIdx].Name
-        if (-not (Test-PlatformMatch -Url $url -SelectedPlatform $selectedPlatform)) {
-            $detected = Detect-Platform -Url $url
-            Show-PlatformMismatchScreen -Selected $selectedPlatform -Detected $detected
-            continue
-        }
-
-        # === Fetch flat ===
+        # Fetch flat (deteksi playlist), bisa di-cancel
         $info = Invoke-FetchJson -URL $url -Message 'Mengambil informasi...' -Flat $true
         if (-not $info) {
-            # Increment fail count
-            if (-not $script:FailCount.ContainsKey($url)) { $script:FailCount[$url] = 0 }
-            $script:FailCount[$url]++
-
-            if ($script:FailCount[$url] -ge 2) {
-                Show-BlockedScreen -Platform $selectedPlatform
-                $script:FailCount.Remove($url)
-                continue
-            }
-
-            $retry = Show-ErrorScreen -Message "Gagal mengambil info. Cek URL atau koneksi."
+            $retry = Show-ErrorScreen -Message "Gagal / dibatalkan. Cek URL atau koneksi."
             if (-not $retry) { $running = $false; break }
             continue
         }
-        # Reset counter kalau berhasil
-        if ($script:FailCount.ContainsKey($url)) { $script:FailCount.Remove($url) }
 
         $isPlaylist = ($info._type -eq 'playlist') -and ($info.entries) -and (@($info.entries).Count -gt 1)
 
@@ -1516,52 +1438,19 @@ try {
         $script:VideoInfo = $info
         Parse-Formats -Info $info
 
-        $fullFeature = Is-FullFeaturePlatform -Url $url
-
         if ($script:Resolutions.Count -eq 0) {
-            # Non-YouTube tanpa video streams -> mungkin gambar/audio only.
-            # Untuk platform simple, langsung download mode auto (bukan error)
-            if (-not $fullFeature) {
-                $result = Show-AutoDownloadScreen -URL $url
-                $errMsg = ""
-                if ($result -eq 'fail' -and $script:LastError) {
-                    $errMsg = (($script:LastError -split "`n") | Where-Object { $_ -match 'ERROR' } | Select-Object -First 1)
-                }
-                if ($result -eq 'fail') {
-                    if (-not $script:FailCount.ContainsKey($url)) { $script:FailCount[$url] = 0 }
-                    $script:FailCount[$url]++
-                    if ($script:FailCount[$url] -ge 2) {
-                        Show-BlockedScreen -Platform $selectedPlatform
-                        $script:FailCount.Remove($url)
-                        continue
-                    }
-                }
-                $again = Show-DoneScreen -Result $result -Message $errMsg
-                if (-not $again) { $running = $false }
-                continue
-            }
             $retry = Show-ErrorScreen -Message "Tidak ada format video tersedia"
             if (-not $retry) { $running = $false; break }
             continue
         }
 
+        # Deteksi apakah platform mendukung full feature (audio track & subtitle)
+        $fullFeature = Is-FullFeaturePlatform -Url $url
+
         $confirm = Show-FormatScreen -FullFeature $fullFeature
         if (-not $confirm) { continue }
 
         $result = Show-DownloadScreen -URL $url -FullFeature $fullFeature
-
-        # Track kegagalan untuk trigger BlockedScreen setelah 2x
-        if ($result -eq 'fail') {
-            if (-not $script:FailCount.ContainsKey($url)) { $script:FailCount[$url] = 0 }
-            $script:FailCount[$url]++
-            if ($script:FailCount[$url] -ge 2) {
-                Show-BlockedScreen -Platform $selectedPlatform
-                $script:FailCount.Remove($url)
-                continue
-            }
-        } else {
-            if ($script:FailCount.ContainsKey($url)) { $script:FailCount.Remove($url) }
-        }
 
         $errMsg = ""
         if ($result -eq 'fail' -and $script:LastError) {
