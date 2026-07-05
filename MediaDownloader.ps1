@@ -84,12 +84,30 @@ $script:ActiveCol    = 0
 $script:PlatformIdx  = 0
 $script:LastError    = ""
 $script:Platforms    = @(
-    [PSCustomObject]@{ Name = 'YouTube';   Hint = 'youtube.com/watch?v=... atau playlist' }
-    [PSCustomObject]@{ Name = 'TikTok';    Hint = 'tiktok.com/@user/video/...' }
-    [PSCustomObject]@{ Name = 'Twitter';   Hint = 'x.com/user/status/...' }
-    [PSCustomObject]@{ Name = 'Instagram'; Hint = 'instagram.com/reel/...' }
-    [PSCustomObject]@{ Name = 'Generic';   Hint = 'semua situs yang didukung' }
+    [PSCustomObject]@{ Name = 'YouTube';   Hint = 'youtube.com/watch?v=... atau playlist'; Full = $true }
+    [PSCustomObject]@{ Name = 'TikTok';    Hint = 'tiktok.com/@user/video/...';              Full = $false }
+    [PSCustomObject]@{ Name = 'Twitter';   Hint = 'x.com/user/status/...';                   Full = $false }
+    [PSCustomObject]@{ Name = 'Instagram'; Hint = 'instagram.com/reel/...';                  Full = $false }
+    [PSCustomObject]@{ Name = 'Bstation';  Hint = 'bilibili.tv/... atau bstation.tv/...';    Full = $false }
+    [PSCustomObject]@{ Name = 'Generic';   Hint = 'semua situs yang didukung';               Full = $false }
 )
+
+# Deteksi platform berdasar URL (untuk mode auto)
+function Detect-Platform {
+    param([string]$Url)
+    if ($Url -match 'youtube\.com|youtu\.be') { return 'YouTube' }
+    if ($Url -match 'tiktok\.com')             { return 'TikTok' }
+    if ($Url -match 'x\.com|twitter\.com')     { return 'Twitter' }
+    if ($Url -match 'instagram\.com')          { return 'Instagram' }
+    if ($Url -match 'bilibili\.tv|bstation')   { return 'Bstation' }
+    return 'Generic'
+}
+
+function Is-FullFeaturePlatform {
+    param([string]$Url)
+    # Hanya YouTube yang mendukung pemilihan audio track & subtitle
+    return ($Url -match 'youtube\.com|youtu\.be')
+}
 
 $defaultDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
 if (-not (Test-Path $defaultDir)) { $defaultDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path } }
@@ -105,6 +123,7 @@ $script:Settings = [PSCustomObject]@{
     AudioLang = 'original'
     MaxRes    = 0
     SaveDir   = $defaultDir
+    Format    = 'mp4'   # 'mp4' atau 'mp3'
 }
 
 function Ensure-Dir {
@@ -120,6 +139,7 @@ function Load-Settings {
             $j = Get-Content $script:SettingsPath -Raw | ConvertFrom-Json
             if ($j.AudioLang) { $script:Settings.AudioLang = [string]$j.AudioLang }
             if ($null -ne $j.MaxRes) { $script:Settings.MaxRes = [int]$j.MaxRes }
+            if ($j.Format -and ($j.Format -eq 'mp3' -or $j.Format -eq 'mp4')) { $script:Settings.Format = [string]$j.Format }
             if ($j.SaveDir) {
                 $d = Ensure-Dir -Path ([string]$j.SaveDir)
                 $script:Settings.SaveDir = $d
@@ -421,14 +441,14 @@ function Invoke-Download {
         [string]$SubLang = $null,
         [int]$BarRow,
         [int]$StatsRow,
-        [string]$Label = ''
+        [string]$Label = '',
+        [string]$OutputFormat = 'mp4'   # 'mp4' atau 'mp3'
     )
 
     $outputPath = Join-Path $script:SaveDir "%(title)s.%(ext)s"
     $ytArgs = New-Object System.Collections.Generic.List[string]
     $ytArgs.Add($URL)
     $ytArgs.Add("-o"); $ytArgs.Add($outputPath)
-    $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
     $ytArgs.Add("--no-warnings")
     $ytArgs.Add("--newline")
     $ytArgs.Add("--no-colors")
@@ -437,13 +457,26 @@ function Invoke-Download {
     $ytArgs.Add("--extractor-args"); $ytArgs.Add("youtube:player_client=all")
     $ytArgs.Add("--progress-template")
     $ytArgs.Add("download:PROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s")
-    $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
 
-    if ($SubLang) {
-        $ytArgs.Add("--write-subs"); $ytArgs.Add("--write-auto-subs")
-        $ytArgs.Add("--sub-langs"); $ytArgs.Add("$SubLang*")
-        $ytArgs.Add("--embed-subs")
-        $ytArgs.Add("--postprocessor-args"); $ytArgs.Add("ffmpeg:-c:s mov_text")
+    if ($OutputFormat -eq 'mp3') {
+        # AUDIO ONLY MODE
+        $ytArgs.Add("-f"); $ytArgs.Add("bestaudio/best")
+        $ytArgs.Add("--extract-audio")
+        $ytArgs.Add("--audio-format"); $ytArgs.Add("mp3")
+        $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")   # kualitas terbaik
+        $ytArgs.Add("--embed-thumbnail")
+        $ytArgs.Add("--add-metadata")
+    } else {
+        # VIDEO MODE
+        $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
+        $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
+
+        if ($SubLang) {
+            $ytArgs.Add("--write-subs"); $ytArgs.Add("--write-auto-subs")
+            $ytArgs.Add("--sub-langs"); $ytArgs.Add("$SubLang*")
+            $ytArgs.Add("--embed-subs")
+            $ytArgs.Add("--postprocessor-args"); $ytArgs.Add("ffmpeg:-c:s mov_text")
+        }
     }
 
     $argString = ($ytArgs | ForEach-Object { '"' + ($_ -replace '(\\*)"', '$1$1\"') + '"' }) -join ' '
@@ -621,7 +654,7 @@ function Show-WelcomeScreen {
         Write-Center -Row ($folderRow + 2) -Text "$FG_DIM$GL_LEFT$GL_RIGHT platform   tab folder   f2 settings   enter fetch   esc quit$RESET"
     }
     if (($folderRow + 4) -lt ($h - 1)) {
-        $prefText = "Dubbing: $(Get-AudioLangLabel $script:Settings.AudioLang)  $GL_DOT  Resolusi: $(Get-ResLabel $script:Settings.MaxRes)"
+        $prefText = "Format: $($script:Settings.Format.ToUpper())  $GL_DOT  Dubbing: $(Get-AudioLangLabel $script:Settings.AudioLang)  $GL_DOT  Resolusi: $(Get-ResLabel $script:Settings.MaxRes)"
         Write-Center -Row ($folderRow + 4) -Text "$FG_ORANGE$GL_BULLET$RESET  $FG_GRAY$prefText$RESET"
     }
 
@@ -731,7 +764,7 @@ function Show-SettingsScreen {
     $top = [Math]::Max(1, [Math]::Floor($h / 2) - 6)
 
     Write-Center -Row $top -Text "$FG_WHITE${BOLD}Settings$RESET" -VisibleLen 8
-    Write-Center -Row ($top + 7) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   $GL_LEFT$GL_RIGHT ubah   enter edit folder   esc simpan & kembali$RESET"
+    Write-Center -Row ($top + 8) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   $GL_LEFT$GL_RIGHT ubah   enter edit folder   esc simpan & kembali$RESET"
 
     # index posisi
     $audioIdx = 0
@@ -742,14 +775,17 @@ function Show-SettingsScreen {
     for ($i = 0; $i -lt $script:ResOptions.Count; $i++) {
         if ($script:ResOptions[$i] -eq $script:Settings.MaxRes) { $resIdx = $i; break }
     }
+    $formatIdx = if ($script:Settings.Format -eq 'mp3') { 1 } else { 0 }
+    $formatOptions = @('MP4 (Video + Audio)', 'MP3 (Audio Only)')
     $folderBuf = $script:Settings.SaveDir
 
-    $sel = 0          # 0=audio, 1=res, 2=folder
+    $sel = 0          # 0=format, 1=audio, 2=res, 3=folder
     $editMode = $false
     $dirty = $true
 
     while ($true) {
         if ($dirty) {
+            $fmtLabel = $formatOptions[$formatIdx]
             $aLabel = $script:AudioLangOptions[$audioIdx].Label
             $rLabel = Get-ResLabel $script:ResOptions[$resIdx]
             # label "Folder          " = 16 char, sisakan 1 utk kursor
@@ -761,7 +797,7 @@ function Show-SettingsScreen {
                 else { $fText = Limit-Text -Text $fText -Max $fMax }
             }
 
-            for ($r = 0; $r -lt 3; $r++) {
+            for ($r = 0; $r -lt 4; $r++) {
                 $row = $top + 2 + $r
                 $isSel = ($sel -eq $r)
                 $accent = if ($isSel) { $FG_BLUE } else { $FG_DIM }
@@ -769,10 +805,10 @@ function Show-SettingsScreen {
                 $bold = if ($isSel) { $BOLD } else { '' }
 
                 switch ($r) {
-                    0 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Dubbing audio   $FG_DIM$GL_LEFT$RESET $tcolor$bold$aLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
-                    1 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Resolusi maks   $FG_DIM$GL_LEFT$RESET $tcolor$bold$rLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
-                    2 {
-                        # kursor gambar sendiri di UJUNG teks (bukan kursor terminal)
+                    0 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Format          $FG_DIM$GL_LEFT$RESET $tcolor$bold$fmtLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
+                    1 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Dubbing audio   $FG_DIM$GL_LEFT$RESET $tcolor$bold$aLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
+                    2 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Resolusi maks   $FG_DIM$GL_LEFT$RESET $tcolor$bold$rLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
+                    3 {
                         $cursorGlyph = if ($editMode -and $isSel) { "$FG_BLUE$GL_FULL$RESET" } else { '' }
                         $fcolor = if ($editMode -and $isSel) { $FG_WHITE } else { $tcolor }
                         Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Folder          $fcolor$bold$fText$RESET$cursorGlyph" -Accent $accent
@@ -784,7 +820,7 @@ function Show-SettingsScreen {
 
         $key = [Console]::ReadKey($true)
 
-        if ($editMode -and $sel -eq 2) {
+        if ($editMode -and $sel -eq 3) {
             if ($key.Key -eq 'Enter') { $editMode = $false; $dirty = $true }
             elseif ($key.Key -eq 'Escape') { $editMode = $false; $folderBuf = $script:Settings.SaveDir; $dirty = $true }
             elseif ($key.Key -eq 'Backspace') { if ($folderBuf.Length -gt 0) { $folderBuf = $folderBuf.Substring(0, $folderBuf.Length - 1); $dirty = $true } }
@@ -801,23 +837,26 @@ function Show-SettingsScreen {
 
         $dirty = $true
         switch ($key.Key) {
-            'UpArrow'   { $sel = ($sel + 2) % 3 }
-            'DownArrow' { $sel = ($sel + 1) % 3 }
+            'UpArrow'   { $sel = ($sel + 3) % 4 }
+            'DownArrow' { $sel = ($sel + 1) % 4 }
             'LeftArrow' {
                 switch ($sel) {
-                    0 { $audioIdx = ($audioIdx + $script:AudioLangOptions.Count - 1) % $script:AudioLangOptions.Count }
-                    1 { $resIdx = ($resIdx + $script:ResOptions.Count - 1) % $script:ResOptions.Count }
+                    0 { $formatIdx = ($formatIdx + 1) % 2 }
+                    1 { $audioIdx = ($audioIdx + $script:AudioLangOptions.Count - 1) % $script:AudioLangOptions.Count }
+                    2 { $resIdx = ($resIdx + $script:ResOptions.Count - 1) % $script:ResOptions.Count }
                 }
             }
             'RightArrow' {
                 switch ($sel) {
-                    0 { $audioIdx = ($audioIdx + 1) % $script:AudioLangOptions.Count }
-                    1 { $resIdx = ($resIdx + 1) % $script:ResOptions.Count }
+                    0 { $formatIdx = ($formatIdx + 1) % 2 }
+                    1 { $audioIdx = ($audioIdx + 1) % $script:AudioLangOptions.Count }
+                    2 { $resIdx = ($resIdx + 1) % $script:ResOptions.Count }
                 }
             }
             'Enter' {
-                if ($sel -eq 2) { $editMode = $true; $dirty = $true }
+                if ($sel -eq 3) { $editMode = $true; $dirty = $true }
                 else {
+                    $script:Settings.Format = if ($formatIdx -eq 1) { 'mp3' } else { 'mp4' }
                     $script:Settings.AudioLang = $script:AudioLangOptions[$audioIdx].Code
                     $script:Settings.MaxRes = $script:ResOptions[$resIdx]
                     $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
@@ -827,6 +866,7 @@ function Show-SettingsScreen {
                 }
             }
             'Escape' {
+                $script:Settings.Format = if ($formatIdx -eq 1) { 'mp3' } else { 'mp4' }
                 $script:Settings.AudioLang = $script:AudioLangOptions[$audioIdx].Code
                 $script:Settings.MaxRes = $script:ResOptions[$resIdx]
                 $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
@@ -896,6 +936,8 @@ function Invoke-FetchJson {
 # ============================================
 
 function Show-FormatScreen {
+    param([bool]$FullFeature = $true)
+
     Clear-Screen
     Draw-Footer
 
@@ -911,8 +953,6 @@ function Show-FormatScreen {
     $uploader = if ($script:VideoInfo.uploader) { [string]$script:VideoInfo.uploader } else { "?" }
 
     $m = Get-PanelMetrics -MaxWidth 76
-
-    # hitung tinggi yang tersedia -> compact adaptif
     $maxItems = [Math]::Max(3, [Math]::Min(8, $h - 12))
     $startRow = [Math]::Max(1, [Math]::Floor(($h - ($maxItems + 9)) / 2))
 
@@ -923,41 +963,59 @@ function Show-FormatScreen {
     Write-PanelLine -Row ($startRow + 1) -Col $m.Col -Width $m.Width -Text "$FG_GRAY$duration  $GL_DOT  $upText$RESET"
 
     $colStart = $startRow + 3
-    $gap = 3
-    $colWidth = [Math]::Floor(([Math]::Min(76, $tw - 6) - ($gap * 2)) / 3)
-    $totalW = ($colWidth * 3) + ($gap * 2)
-    $col1 = [Math]::Max(0, [Math]::Floor($tw / 2) - [Math]::Floor($totalW / 2))
-    $col2 = $col1 + $colWidth + $gap
-    $col3 = $col2 + $colWidth + $gap
+
+    # Kolom count berbeda tergantung platform
+    $colCount = if ($FullFeature) { 3 } else { 2 }
+    $lists = if ($FullFeature) { @($script:Resolutions, $script:AudioTracks, $script:SubtitleList) } else { @($script:FormatOptions, $script:Resolutions) }
+    $headers = if ($FullFeature) { @('Resolusi', 'Audio', 'Subtitle') } else { @('Format', 'Resolusi') }
+
+    $gap = 4
+    $colWidth = [Math]::Floor(([Math]::Min(70, $tw - 6) - ($gap * ($colCount - 1))) / $colCount)
+    $totalW = ($colWidth * $colCount) + ($gap * ($colCount - 1))
+    $cols = @()
+    $baseCol = [Math]::Max(0, [Math]::Floor($tw / 2) - [Math]::Floor($totalW / 2))
+    for ($k = 0; $k -lt $colCount; $k++) { $cols += ($baseCol + $k * ($colWidth + $gap)) }
 
     Write-Center -Row ($colStart + 2 + $maxItems + 1) -Text "$FG_DIM$GL_UP$GL_DOWN pilih  $GL_LEFT$GL_RIGHT/tab kolom  enter download  esc batal$RESET"
 
     Apply-SettingsToSelection
     $script:ActiveCol = 0
+
+    # Sinkronisasi selection: kolom pertama simple = format
+    if (-not $FullFeature) {
+        $script:SelRes = if ($script:Settings.Format -eq 'mp3') { 1 } else { 0 }  # sementara pakai SelRes utk format
+        $script:SelAudio = 0  # sementara pakai SelAudio utk resolusi
+        # Simpan resolusi terpilih dari settings ke SelAudio
+        if ($script:Settings.MaxRes -gt 0) {
+            for ($i = 0; $i -lt $script:Resolutions.Count; $i++) {
+                if ($script:Resolutions[$i].Height -le $script:Settings.MaxRes) { $script:SelAudio = $i; break }
+            }
+        }
+    }
+
     $dirty = $true
 
     while ($true) {
         if ($dirty) {
-            $h1 = if ($script:ActiveCol -eq 0) { "$FG_BLUE${BOLD}Resolusi$RESET" } else { "${FG_GRAY}Resolusi$RESET" }
-            $h2 = if ($script:ActiveCol -eq 1) { "$FG_BLUE${BOLD}Audio$RESET"    } else { "${FG_GRAY}Audio$RESET" }
-            $h3 = if ($script:ActiveCol -eq 2) { "$FG_BLUE${BOLD}Subtitle$RESET" } else { "${FG_GRAY}Subtitle$RESET" }
-            Out-Ansi ((Ansi-Pos $colStart $col1) + "$h1    " + (Ansi-Pos $colStart $col2) + "$h2    " + (Ansi-Pos $colStart $col3) + "$h3    ")
-
-            $lists = @($script:Resolutions, $script:AudioTracks, $script:SubtitleList)
-            $sels  = @($script:SelRes, $script:SelAudio, $script:SelSub)
-            $cols  = @($col1, $col2, $col3)
-
+            # Header
             $sb = New-Object System.Text.StringBuilder
-            for ($c = 0; $c -lt 3; $c++) {
-                # windowing per kolom bila item > maxItems
+            for ($k = 0; $k -lt $colCount; $k++) {
+                $htxt = if ($script:ActiveCol -eq $k) { "$FG_BLUE${BOLD}$($headers[$k])$RESET" } else { "${FG_GRAY}$($headers[$k])$RESET" }
+                [void]$sb.Append((Ansi-Pos $colStart $cols[$k]) + "$htxt$(' ' * 8)")
+            }
+
+            $sels = if ($FullFeature) { @($script:SelRes, $script:SelAudio, $script:SelSub) } else { @($script:SelRes, $script:SelAudio) }
+
+            for ($c = 0; $c -lt $colCount; $c++) {
                 $selIdx = $sels[$c]
+                $listCount = $lists[$c].Count
                 $start = 0
                 if ($selIdx -ge $maxItems) { $start = $selIdx - $maxItems + 1 }
                 for ($r = 0; $r -lt $maxItems; $r++) {
                     $i = $start + $r
                     $row = $colStart + 2 + $r
                     [void]$sb.Append((Ansi-Pos $row $cols[$c]))
-                    if ($i -lt $lists[$c].Count) {
+                    if ($i -lt $listCount) {
                         $item = Limit-Text -Text $lists[$c][$i].Label -Max ($colWidth - 3)
                         $isSel = ($i -eq $selIdx)
                         $prefix = if ($script:ActiveCol -eq $c -and $isSel) { "$FG_BLUE$GL_ARROW$RESET " } elseif ($isSel) { "$FG_CYAN$GL_ARROW$RESET " } else { "  " }
@@ -977,22 +1035,36 @@ function Show-FormatScreen {
         $dirty = $true
         switch ($key.Key) {
             'UpArrow' {
-                switch ($script:ActiveCol) {
-                    0 { $script:SelRes   = ($script:SelRes + $script:Resolutions.Count - 1) % [Math]::Max(1,$script:Resolutions.Count) }
-                    1 { $script:SelAudio = ($script:SelAudio + $script:AudioTracks.Count - 1) % [Math]::Max(1,$script:AudioTracks.Count) }
-                    2 { $script:SelSub   = ($script:SelSub + $script:SubtitleList.Count - 1) % [Math]::Max(1,$script:SubtitleList.Count) }
+                if ($FullFeature) {
+                    switch ($script:ActiveCol) {
+                        0 { $script:SelRes   = ($script:SelRes + $script:Resolutions.Count - 1) % [Math]::Max(1,$script:Resolutions.Count) }
+                        1 { $script:SelAudio = ($script:SelAudio + $script:AudioTracks.Count - 1) % [Math]::Max(1,$script:AudioTracks.Count) }
+                        2 { $script:SelSub   = ($script:SelSub + $script:SubtitleList.Count - 1) % [Math]::Max(1,$script:SubtitleList.Count) }
+                    }
+                } else {
+                    switch ($script:ActiveCol) {
+                        0 { $script:SelRes   = ($script:SelRes + $script:FormatOptions.Count - 1) % [Math]::Max(1,$script:FormatOptions.Count) }
+                        1 { $script:SelAudio = ($script:SelAudio + $script:Resolutions.Count - 1) % [Math]::Max(1,$script:Resolutions.Count) }
+                    }
                 }
             }
             'DownArrow' {
-                switch ($script:ActiveCol) {
-                    0 { $script:SelRes   = ($script:SelRes + 1) % [Math]::Max(1,$script:Resolutions.Count) }
-                    1 { $script:SelAudio = ($script:SelAudio + 1) % [Math]::Max(1,$script:AudioTracks.Count) }
-                    2 { $script:SelSub   = ($script:SelSub + 1) % [Math]::Max(1,$script:SubtitleList.Count) }
+                if ($FullFeature) {
+                    switch ($script:ActiveCol) {
+                        0 { $script:SelRes   = ($script:SelRes + 1) % [Math]::Max(1,$script:Resolutions.Count) }
+                        1 { $script:SelAudio = ($script:SelAudio + 1) % [Math]::Max(1,$script:AudioTracks.Count) }
+                        2 { $script:SelSub   = ($script:SelSub + 1) % [Math]::Max(1,$script:SubtitleList.Count) }
+                    }
+                } else {
+                    switch ($script:ActiveCol) {
+                        0 { $script:SelRes   = ($script:SelRes + 1) % [Math]::Max(1,$script:FormatOptions.Count) }
+                        1 { $script:SelAudio = ($script:SelAudio + 1) % [Math]::Max(1,$script:Resolutions.Count) }
+                    }
                 }
             }
-            'Tab'        { $script:ActiveCol = ($script:ActiveCol + 1) % 3 }
-            'LeftArrow'  { $script:ActiveCol = ($script:ActiveCol + 2) % 3 }
-            'RightArrow' { $script:ActiveCol = ($script:ActiveCol + 1) % 3 }
+            'Tab'        { $script:ActiveCol = ($script:ActiveCol + 1) % $colCount }
+            'LeftArrow'  { $script:ActiveCol = ($script:ActiveCol + $colCount - 1) % $colCount }
+            'RightArrow' { $script:ActiveCol = ($script:ActiveCol + 1) % $colCount }
             'Enter'      { return $true }
             'Escape'     { return $false }
             default      { $dirty = $false }
@@ -1000,12 +1072,18 @@ function Show-FormatScreen {
     }
 }
 
+# Opsi format global
+$script:FormatOptions = @(
+    [PSCustomObject]@{ Label = 'MP4 (Video)'; Value = 'mp4' }
+    [PSCustomObject]@{ Label = 'MP3 (Audio)'; Value = 'mp3' }
+)
+
 # ============================================
 # SCREEN 4a: DOWNLOAD SINGLE
 # ============================================
 
 function Show-DownloadScreen {
-    param([string]$URL)
+    param([string]$URL, [bool]$FullFeature = $true)
     Clear-Screen
     Draw-Footer
 
@@ -1019,15 +1097,31 @@ function Show-DownloadScreen {
     Write-PanelLine -Row ($centerRow - 4) -Col $m.Col -Width $m.Width -Text "${FG_CYAN}Downloading...$RESET"
     Write-PanelLine -Row ($centerRow - 3) -Col $m.Col -Width $m.Width -Text "$FG_WHITE$titleText$RESET"
 
-    $resolution = $script:Resolutions[$script:SelRes]
-    $audio      = $script:AudioTracks[$script:SelAudio]
-    $subtitle   = $script:SubtitleList[$script:SelSub]
+    if ($FullFeature) {
+        # YOUTUBE MODE (full)
+        $resolution = $script:Resolutions[$script:SelRes]
+        $audio      = $script:AudioTracks[$script:SelAudio]
+        $subtitle   = $script:SubtitleList[$script:SelSub]
 
-    $vid = $resolution.FormatID
-    $audioID = if ($audio.FormatID) { $audio.FormatID } else { "bestaudio" }
-    $fString = "$vid+$audioID/$vid+bestaudio/best"
+        $vid = $resolution.FormatID
+        $audioID = if ($audio.FormatID) { $audio.FormatID } else { "bestaudio" }
+        $fString = "$vid+$audioID/$vid+bestaudio/best"
 
-    return Invoke-Download -URL $URL -FormatString $fString -SubLang $subtitle.Lang -BarRow $centerRow -StatsRow ($centerRow + 2)
+        return Invoke-Download -URL $URL -FormatString $fString -SubLang $subtitle.Lang -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
+    } else {
+        # SIMPLE MODE (TikTok/IG/Twitter/Bstation)
+        # SelRes = format index (0=mp4, 1=mp3), SelAudio = resolution index
+        $outputFmt = $script:FormatOptions[$script:SelRes].Value
+        if ($outputFmt -eq 'mp3') {
+            return Invoke-Download -URL $URL -FormatString 'bestaudio/best' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp3'
+        } else {
+            $resolution = $script:Resolutions[$script:SelAudio]
+            $vid = $resolution.FormatID
+            $fString = "$vid+bestaudio/$vid/best"
+            return Invoke-Download -URL $URL -FormatString $fString -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
+        }
+    }
+
 }
 
 # ============================================
@@ -1113,6 +1207,7 @@ function Show-PlaylistScreen {
     }
 
     $fString = Build-AutoFormat
+    $outFmt = $script:Settings.Format
     $okCount = 0
     $stopAll = $false
 
@@ -1130,7 +1225,7 @@ function Show-PlaylistScreen {
         Draw-PlaylistWindow -Current $i
 
         $label = "Video $($i + 1)/$($entries.Count)"
-        $res = Invoke-Download -URL $vurl -FormatString $fString -SubLang $null -BarRow $barRow -StatsRow $statsRow -Label $label
+        $res = Invoke-Download -URL $vurl -FormatString $fString -SubLang $null -BarRow $barRow -StatsRow $statsRow -Label $label -OutputFormat $outFmt
 
         if ($res -eq 'ok') { $status[$i] = 2; $okCount++ }
         elseif ($res -eq 'cancel') { $status[$i] = 4; $stopAll = $true }
@@ -1287,10 +1382,13 @@ try {
             continue
         }
 
-        $confirm = Show-FormatScreen
+        # Deteksi apakah platform mendukung full feature (audio track & subtitle)
+        $fullFeature = Is-FullFeaturePlatform -Url $url
+
+        $confirm = Show-FormatScreen -FullFeature $fullFeature
         if (-not $confirm) { continue }
 
-        $result = Show-DownloadScreen -URL $url
+        $result = Show-DownloadScreen -URL $url -FullFeature $fullFeature
 
         $errMsg = ""
         if ($result -eq 'fail' -and $script:LastError) {
