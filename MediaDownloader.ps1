@@ -1,3 +1,16 @@
+<#
+.SYNOPSIS
+    Media Downloader v1.0 - Terminal UI
+.DESCRIPTION
+    Downloader universal untuk YouTube / TikTok / Twitter / Instagram / Bstation / Gambar.
+    - UI statis anti-kedip
+    - Progress bar real-time
+    - Playlist checklist
+    - MP4 / MP3 / Image
+    - Auto-update dari GitHub
+    - Auto-cookies dari browser
+#>
+
 $script:AppVersion = '1.0'
 
 $ErrorActionPreference = 'Stop'
@@ -97,6 +110,16 @@ function Classify-Error {
     param([string]$ErrorText)
     if (-not $ErrorText) { return 'unknown' }
 
+    # Cookie / browser lock errors -> beda pesan, bukan masalah video
+    $cookiePatterns = @(
+        'could not copy .* cookie', 'could not find .* cookies? database',
+        'please close all running instances', 'database is locked',
+        'failed to load cookies', 'unsupported browser', 'could not detect browser'
+    )
+    foreach ($p in $cookiePatterns) {
+        if ($ErrorText -imatch $p) { return 'cookie' }
+    }
+
     # Auth / privacy errors -> JANGAN blok, ini masalah user (butuh login)
     $authPatterns = @(
         'private video', 'this video is private', 'members-only',
@@ -154,86 +177,6 @@ function Is-FullFeaturePlatform {
 # =====================================================
 $script:ConfigDir    = Join-Path $env:USERPROFILE '.media-downloader'
 
-# =====================================================
-# BLOCKLIST PERMANEN (per platform)
-# Kalau download gagal berulang, blok platform-nya
-# =====================================================
-$script:BlocklistPath = Join-Path $script:ConfigDir 'blocklist.json'
-$script:Blocklist = @{}   # key = platform name, value = @{ Blocked=$true; Reason=''; FailCount=0 }
-$script:FailThreshold = 2  # 2x gagal berturut-turut = blok
-
-function Load-Blocklist {
-    if (Test-Path $script:BlocklistPath) {
-        try {
-            $j = Get-Content $script:BlocklistPath -Raw | ConvertFrom-Json
-            foreach ($p in $j.PSObject.Properties) {
-                $script:Blocklist[$p.Name] = @{
-                    Blocked   = [bool]$p.Value.Blocked
-                    Reason    = [string]$p.Value.Reason
-                    FailCount = [int]$p.Value.FailCount
-                }
-            }
-        } catch {}
-    }
-}
-
-function Save-Blocklist {
-    try {
-        if (-not (Test-Path $script:ConfigDir)) { New-Item -ItemType Directory -Path $script:ConfigDir -Force | Out-Null }
-        $script:Blocklist | ConvertTo-Json | Set-Content -Path $script:BlocklistPath -Encoding UTF8
-    } catch {}
-}
-
-function Is-PlatformBlocked {
-    param([string]$Platform)
-    if (-not $script:Blocklist.ContainsKey($Platform)) { return $false }
-    return [bool]$script:Blocklist[$Platform].Blocked
-}
-
-function Get-BlockReason {
-    param([string]$Platform)
-    if (-not $script:Blocklist.ContainsKey($Platform)) { return '' }
-    return [string]$script:Blocklist[$Platform].Reason
-}
-
-function Record-PlatformFail {
-    param([string]$Platform, [string]$Reason = '', [string]$ErrorText = '')
-
-    # Klasifikasi: kalau error = auth/private/cookies -> JANGAN blok, itu bukan error server
-    $errType = Classify-Error -ErrorText $ErrorText
-    if ($errType -eq 'auth' -or $errType -eq 'network') {
-        return   # skip - ini bukan salah platform
-    }
-
-    if (-not $script:Blocklist.ContainsKey($Platform)) {
-        $script:Blocklist[$Platform] = @{ Blocked = $false; Reason = ''; FailCount = 0 }
-    }
-    $script:Blocklist[$Platform].FailCount++
-    if ($script:Blocklist[$Platform].FailCount -ge $script:FailThreshold) {
-        $script:Blocklist[$Platform].Blocked = $true
-        if ($Reason) { $script:Blocklist[$Platform].Reason = $Reason } else { $script:Blocklist[$Platform].Reason = "Gagal $($script:Blocklist[$Platform].FailCount)x berturut-turut" }
-    }
-    Save-Blocklist
-}
-
-function Record-PlatformSuccess {
-    param([string]$Platform)
-    if ($script:Blocklist.ContainsKey($Platform)) {
-        $script:Blocklist[$Platform].FailCount = 0
-        $script:Blocklist[$Platform].Blocked = $false
-        $script:Blocklist[$Platform].Reason = ''
-        Save-Blocklist
-    }
-}
-
-function Unblock-Platform {
-    param([string]$Platform)
-    if ($script:Blocklist.ContainsKey($Platform)) {
-        $script:Blocklist.Remove($Platform)
-        Save-Blocklist
-    }
-}
-
 $defaultDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
 if (-not (Test-Path $defaultDir)) { $defaultDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path } }
 $script:SaveDir = $defaultDir
@@ -248,7 +191,7 @@ $script:Settings = [PSCustomObject]@{
     MaxRes    = 0
     SaveDir   = $defaultDir
     Format    = 'mp4'   # 'mp4' atau 'mp3'
-    Cookies   = 'auto'  # 'off' | 'auto' | 'chrome' | 'edge' | 'firefox' | 'brave' | 'opera' | 'vivaldi'
+    Cookies   = 'off'   # 'off' (default aman) | 'auto' | 'chrome' | 'edge' | 'firefox' | 'brave' | 'opera' | 'vivaldi'
 }
 
 # Opsi cookies
@@ -862,7 +805,7 @@ function Show-WelcomeScreen {
     $m = Get-PanelMetrics -MaxWidth 78
 
     if (($folderRow + 2) -lt ($h - 1)) {
-        Write-Center -Row ($folderRow + 2) -Text "$FG_DIM$GL_LEFT$GL_RIGHT platform   tab folder   f2 settings   ctrl+u unblock   enter fetch   esc quit$RESET"
+        Write-Center -Row ($folderRow + 2) -Text "$FG_DIM$GL_LEFT$GL_RIGHT platform   tab folder   f2 settings   enter fetch   esc quit$RESET"
     }
     if (($folderRow + 4) -lt ($h - 1)) {
         $prefText = "Format: $($script:Settings.Format.ToUpper())  $GL_DOT  Dubbing: $(Get-AudioLangLabel $script:Settings.AudioLang)  $GL_DOT  Resolusi: $(Get-ResLabel $script:Settings.MaxRes)"
@@ -877,14 +820,8 @@ function Show-WelcomeScreen {
     while ($true) {
         if ($script:PlatformIdx -ne $lastIdx) {
             $platform = $script:Platforms[$script:PlatformIdx]
-            $isBlocked = Is-PlatformBlocked -Platform $platform.Name
-            if ($isBlocked) {
-                $labelText = "$FG_DIM$GL_LEFT$RESET   $FG_RED$BOLD$($platform.Name)$RESET $FG_RED[BLOCKED]$RESET   $FG_DIM$GL_RIGHT$RESET"
-                $visLen = $platform.Name.Length + 8 + 10
-            } else {
-                $labelText = "$FG_DIM$GL_LEFT$RESET   $FG_BLUE$BOLD$($platform.Name)$RESET   $FG_DIM$GL_RIGHT$RESET"
-                $visLen = $platform.Name.Length + 8
-            }
+            $labelText = "$FG_DIM$GL_LEFT$RESET   $FG_BLUE$BOLD$($platform.Name)$RESET   $FG_DIM$GL_RIGHT$RESET"
+            $visLen = $platform.Name.Length + 8
             Write-Center -Row $panelRow -Text $labelText -VisibleLen $visLen
             $lastIdx = $script:PlatformIdx
             $lastUrl = $null
@@ -943,11 +880,6 @@ function Show-WelcomeScreen {
         elseif ($key.Key -eq 'F2') {
             Show-SettingsScreen
             return 'RELOAD'   # kembali & redraw welcome
-        }
-        elseif (($key.Modifiers -band [ConsoleModifiers]::Control) -and $key.Key -eq 'U') {
-            $platform = $script:Platforms[$script:PlatformIdx]
-            Unblock-Platform -Platform $platform.Name
-            $lastIdx = -1   # paksa redraw label
         }
         elseif ($key.Key -eq 'Tab') { $field = ($field + 1) % 2 }
         elseif ($key.Key -eq 'Backspace') {
@@ -1125,49 +1057,84 @@ function Invoke-FetchJson {
 
     $h = Get-TermHeight
     $centerRow = [Math]::Floor($h / 2)
-
     $flatArg = if ($Flat) { '--flat-playlist' } else { '--no-playlist' }
-    $ck = Get-CookieBrowserForYtdlp
-    $job = Start-Job -ScriptBlock {
-        param($u, $fa, $ck)
-        try {
-            if ($ck) {
-                $json = & yt-dlp -J $fa --cookies-from-browser $ck --extractor-args "youtube:player_client=all" --no-warnings $u 2>$null
-            } else {
-                $json = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>$null
-            }
-            return @{ Success = $true; Data = ($json -join '') }
-        } catch { return @{ Success = $false; Error = $_.ToString() } }
-    } -ArgumentList $URL, $flatArg, $ck
 
     $shortUrl = Limit-Text -Text $URL -Max ([Math]::Max(20, (Get-TermWidth) - 8))
     Write-Center -Row ($centerRow + 2) -Text "$FG_DIM$shortUrl$RESET"
 
-    $i = 0
-    $cancelled = $false
-    while ($job.State -eq 'Running') {
-        $spin = $script:SpinChars[$i % 10]
-        Write-Center -Row $centerRow -Text "$FG_CYAN$spin$RESET  $FG_WHITE$Message$RESET  ${FG_DIM}(esc batal)$RESET"
-        while ([Console]::KeyAvailable) {
-            $k = [Console]::ReadKey($true)
-            if ($k.Key -eq 'Escape') { $cancelled = $true; break }
+    # Job scriptblock: capture STDOUT dan STDERR secara terpisah dan akurat
+    # (2>&1 lalu pisahkan ErrorRecord vs output biasa)
+    $attemptScript = {
+        param($u, $fa, $ck)
+        try {
+            $ytArgs = @('-J', $fa, '--extractor-args', 'youtube:player_client=all', '--no-warnings')
+            if ($ck) { $ytArgs += @('--cookies-from-browser', $ck) }
+            $ytArgs += $u
+
+            $output = & yt-dlp @ytArgs 2>&1
+            $stdoutLines = @($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+            $stderrLines = @($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() })
+            $json = ($stdoutLines -join '')
+            $err  = ($stderrLines -join "`n")
+
+            if ($json) { return @{ Success = $true; Data = $json; Error = $err } }
+            return @{ Success = $false; Data = $null; Error = $err }
+        } catch {
+            return @{ Success = $false; Data = $null; Error = $_.ToString() }
         }
-        if ($cancelled) { break }
-        Start-Sleep -Milliseconds 80
-        $i++
     }
 
-    if ($cancelled) {
-        try { Stop-Job -Job $job -ErrorAction SilentlyContinue } catch {}
-        try { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue } catch {}
+    function Wait-FetchJob {
+        param($Job, [string]$Msg)
+        $i = 0
+        $cancelled = $false
+        while ($Job.State -eq 'Running') {
+            $spin = $script:SpinChars[$i % 10]
+            Write-Center -Row $centerRow -Text "$FG_CYAN$spin$RESET  $FG_WHITE$Msg$RESET  ${FG_DIM}(esc batal)$RESET"
+            while ([Console]::KeyAvailable) {
+                $k = [Console]::ReadKey($true)
+                if ($k.Key -eq 'Escape') { $cancelled = $true; break }
+            }
+            if ($cancelled) { break }
+            Start-Sleep -Milliseconds 80
+            $i++
+        }
+        if ($cancelled) {
+            try { Stop-Job -Job $Job -ErrorAction SilentlyContinue } catch {}
+            try { Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue } catch {}
+            return @{ Cancelled = $true }
+        }
+        $r = Receive-Job -Job $Job
+        Remove-Job -Job $Job -Force
+        return $r
+    }
+
+    # === Attempt 1: dengan cookies (kalau setting Cookies bukan 'off') ===
+    $ck = Get-CookieBrowserForYtdlp
+    $job = Start-Job -ScriptBlock $attemptScript -ArgumentList $URL, $flatArg, $ck
+    $result = Wait-FetchJob -Job $job -Msg $Message
+    if ($result.Cancelled) { return $null }
+
+    # === Fallback otomatis: kalau attempt dengan cookies gagal, coba lagi TANPA cookies ===
+    # (mengatasi kasus browser sedang terbuka -> database cookie ter-lock)
+    if ((-not $result.Success) -and $ck) {
+        $job2 = Start-Job -ScriptBlock $attemptScript -ArgumentList $URL, $flatArg, $null
+        $result2 = Wait-FetchJob -Job $job2 -Msg 'Mencoba ulang tanpa cookies...'
+        if ($result2.Cancelled) { return $null }
+        if ($result2.Success) { $result = $result2 }
+        else { $script:LastError = $result2.Error }
+    }
+
+    if (-not $result.Success -or -not $result.Data) {
+        if (-not $script:LastError) { $script:LastError = $result.Error }
         return $null
     }
 
-    $result = Receive-Job -Job $job
-    Remove-Job -Job $job -Force
-
-    if (-not $result -or -not $result.Success -or -not $result.Data) { return $null }
-    try { return ($result.Data | ConvertFrom-Json) } catch { return $null }
+    $script:LastError = ''
+    try { return ($result.Data | ConvertFrom-Json) } catch {
+        $script:LastError = "Gagal parse data video: $($_.Exception.Message)"
+        return $null
+    }
 }
 
 # ============================================
@@ -1654,7 +1621,6 @@ function Test-Dependencies {
 
 try {
     Load-Settings
-    Load-Blocklist
     if (-not (Test-Dependencies)) { exit }
 
     # Auto-update check (silent, non-blocking failure)
@@ -1666,14 +1632,7 @@ try {
         if ($null -eq $url) { $running = $false; break }
         if ($url -eq 'RELOAD') { continue }   # habis dari settings
 
-        # === Cek blocklist ===
         $detectedPlatform = Detect-Platform -Url $url
-        if (Is-PlatformBlocked -Platform $detectedPlatform) {
-            $reason = Get-BlockReason -Platform $detectedPlatform
-            $retry = Show-ErrorScreen -Message "$detectedPlatform diblokir permanen. $reason"
-            if (-not $retry) { $running = $false; break }
-            continue
-        }
 
         # === IMAGE DIRECT DOWNLOAD ===
         if (Is-ImageUrl -Url $url) {
@@ -1689,7 +1648,6 @@ try {
         if (-not $info) {
             $errText = if ($script:LastError) { $script:LastError } else { '' }
             $errType = Classify-Error -ErrorText $errText
-            Record-PlatformFail -Platform $detectedPlatform -Reason 'Gagal fetch info' -ErrorText $errText
             $msg = switch ($errType) {
                 'auth'    { "Video private / butuh login. Aktifkan cookies di Settings (F2)." }
                 'network' { "Koneksi bermasalah. Cek internet Anda." }
@@ -1740,13 +1698,6 @@ try {
         if (-not $confirm) { continue }
 
         $result = Show-DownloadScreen -URL $url -FullFeature $fullFeature
-
-        # Update blocklist tracking
-        if ($result -eq 'ok') {
-            Record-PlatformSuccess -Platform $detectedPlatform
-        } elseif ($result -eq 'fail') {
-            Record-PlatformFail -Platform $detectedPlatform -Reason 'Download gagal' -ErrorText $script:LastError
-        }
 
         $errMsg = ""
         if ($result -eq 'fail' -and $script:LastError) {
