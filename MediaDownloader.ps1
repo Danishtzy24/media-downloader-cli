@@ -163,9 +163,10 @@ function Is-FullFeaturePlatform {
     return ($Url -match 'youtube\.com|youtu\.be')
 }
 
-# --- Config dir dipakai oleh settings + blocklist ---
-$script:ConfigDir = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE '.media-downloader' } else { Join-Path $HOME '.media-downloader' }
-$script:SettingsPath = Join-Path $script:ConfigDir 'settings.json'
+# =====================================================
+# CONFIG & GLOBALS
+# =====================================================
+$script:ConfigDir    = Join-Path $env:USERPROFILE '.media-downloader'
 
 # =====================================================
 # BLOCKLIST PERMANEN (per platform)
@@ -252,6 +253,8 @@ if (-not (Test-Path $defaultDir)) { $defaultDir = if ($PSScriptRoot) { $PSScript
 $script:SaveDir = $defaultDir
 
 # --- Settings (persisten) ---
+$script:SettingsPath = Join-Path $script:ConfigDir 'settings.json'
+
 # AudioLang: 'original' atau kode bahasa ('id','en','ar',...)
 # MaxRes: 0 = best, atau 2160/1440/1080/720/480/360
 $script:Settings = [PSCustomObject]@{
