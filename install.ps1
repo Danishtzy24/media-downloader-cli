@@ -1,3 +1,14 @@
+<#
+.SYNOPSIS
+    Media Downloader v1.0 - Installer
+
+    Install:
+        irm https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1 | iex
+
+    Commands:
+        Media          - Run application
+        Remove-Media   - Uninstall
+#>
 
 $ErrorActionPreference = "Stop"
 
