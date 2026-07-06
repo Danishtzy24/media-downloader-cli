@@ -170,6 +170,91 @@ function Is-YouTubeMusicUrl {
     return ($Url -match 'music\.youtube\.com')
 }
 
+# Heuristik: apakah playlist YouTube (biasa) ini kemungkinan besar isinya MUSIK?
+# Dilihat dari: judul playlist mengandung kata musik/album, atau OLAK5 id (playlist auto-generated
+# YouTube untuk album), atau durasi rata-rata track pendek (< 8 menit).
+function Is-LikelyMusicPlaylist {
+    param($Info)
+    if (-not $Info) { return $false }
+
+    $title = [string]$Info.title
+    $plId = [string]$Info.id
+    $uploader = [string]$Info.uploader
+    $entries = @($Info.entries | Where-Object { $_ })
+
+    # Playlist auto-generated YouTube untuk album/single -> ID mulai dengan OLAK5
+    if ($plId -match '^OLAK5') { return $true }
+
+    # Judul playlist mengandung kata kunci musik
+    if ($title -imatch '\b(album|single|ep|soundtrack|ost|playlist musik|music mix|lagu|songs?|hits|compilation)\b') { return $true }
+
+    # Channel "Topic" = channel artis auto-generated YouTube (khusus musik)
+    if ($uploader -imatch ' - Topic$') { return $true }
+
+    # Kalau semua durasi entry pendek (< 8 menit rata-rata), kemungkinan musik
+    if ($entries.Count -ge 3) {
+        $durations = @($entries | Where-Object { $_.duration -and [double]$_.duration -gt 0 } | ForEach-Object { [double]$_.duration })
+        if ($durations.Count -ge 3) {
+            $avg = ($durations | Measure-Object -Average).Average
+            if ($avg -lt 480) { return $true }   # rata-rata di bawah 8 menit
+        }
+    }
+
+    return $false
+}
+
+# Layar pilihan: user diminta memilih video atau audio untuk playlist yang ambigu
+function Show-PlaylistTypeChoice {
+    param($Info)
+
+    Clear-Screen
+    Draw-Footer -Info 'playlist'
+
+    $h = Get-TermHeight
+    $tw = Get-TermWidth
+    $m = Get-PanelMetrics -MaxWidth 70
+    $top = [Math]::Max(2, [Math]::Floor($h / 2) - 5)
+
+    $title = [string]$Info.title
+    $count = @($Info.entries | Where-Object { $_ }).Count
+
+    Write-Center -Row $top -Text "$FG_WHITE${BOLD}Playlist Terdeteksi$RESET" -VisibleLen 19
+    Write-PanelLine -Row ($top + 2) -Col $m.Col -Width $m.Width -Text "$FG_WHITE$(Limit-Text -Text $title -Max ($m.Inner - 1))$RESET"
+    Write-PanelLine -Row ($top + 3) -Col $m.Col -Width $m.Width -Text "$FG_GRAY$count item  $GL_DOT  pilih mode download$RESET"
+
+    $sel = 0   # 0 = MP4 video, 1 = MP3 audio
+    $dirty = $true
+
+    while ($true) {
+        if ($dirty) {
+            $labels = @(
+                @{ Icon = '[V]'; Title = 'Video (MP4)';       Desc = 'Download semua sebagai video dengan resolusi terbaik' }
+                @{ Icon = '[A]'; Title = 'Audio (MP3 + Cover)'; Desc = 'Download semua sebagai lagu MP3 dengan cover art' }
+            )
+            for ($i = 0; $i -lt 2; $i++) {
+                $row = $top + 5 + ($i * 2)
+                $isSel = ($sel -eq $i)
+                $accent = if ($isSel) { $FG_BLUE } else { $FG_DIM }
+                $tcolor = if ($isSel) { $FG_WHITE } else { $FG_GRAY }
+                $iconColor = if ($isSel) { $FG_CYAN } else { $FG_DIM }
+                $bold = if ($isSel) { $BOLD } else { '' }
+                Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "$iconColor$($labels[$i].Icon)$RESET  $tcolor$bold$($labels[$i].Title)$RESET  $FG_DIM$($labels[$i].Desc)$RESET" -Accent $accent
+            }
+            $dirty = $false
+        }
+
+        Write-Center -Row ($top + 10) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   enter konfirmasi   esc batal$RESET"
+
+        $key = [Console]::ReadKey($true)
+        switch ($key.Key) {
+            'UpArrow'   { $sel = ($sel + 1) % 2; $dirty = $true }
+            'DownArrow' { $sel = ($sel + 1) % 2; $dirty = $true }
+            'Enter'     { return @('mp4','mp3')[$sel] }
+            'Escape'    { return $null }
+        }
+    }
+}
+
 # =====================================================
 # CONFIG & GLOBALS
 # =====================================================
@@ -833,10 +918,12 @@ function Invoke-Download {
 
         # COVER ART: convert thumbnail ke jpg (kompatibel ID3) lalu embed ke MP3.
         # Tidak pakai --write-thumbnail agar tidak ada file .jpg sisa di folder.
+        # Biarkan yt-dlp yang pilih thumbnail terbaik (biasanya sudah high-res persegi
+        # untuk YouTube Music, atau landscape untuk video biasa). TIDAK melakukan
+        # crop/pad apapun -> hasilnya sesuai aslinya, tidak ada bidang putih atau
+        # bagian gambar yang terpotong.
         $ytArgs.Add("--convert-thumbnails"); $ytArgs.Add("jpg")
         $ytArgs.Add("--embed-thumbnail")
-        # Crop thumbnail 16:9 menjadi persegi 1:1 seperti cover album musik
-        $ytArgs.Add("--ppa"); $ytArgs.Add("ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -vf crop=ih:ih")
 
         # METADATA: judul, artist, album, tanggal -> terbaca oleh semua music player
         $ytArgs.Add("--embed-metadata")
@@ -1665,7 +1752,7 @@ function Show-PlaylistScreen {
     $m = Get-PanelMetrics -MaxWidth 76
     $topRow = 1
 
-    $playlistTag = if ($ForceAudio) { " (YT Music)" } else { "" }
+    $playlistTag = if ($ForceAudio) { " (Audio)" } else { "" }
     Write-PanelLine -Row $topRow -Col $m.Col -Width $m.Width -Text "$FG_WHITE$BOLD$(Limit-Text -Text $plTitle -Max ($m.Inner - 1 - $playlistTag.Length))$playlistTag$RESET"
     if ($ForceAudio) {
         Write-PanelLine -Row ($topRow + 1) -Col $m.Col -Width $m.Width -Text "$FG_GREEN$GL_BULLET$RESET $FG_GRAY$($entries.Count) track audio  $GL_DOT  MP3 + cover$RESET"
@@ -2003,8 +2090,23 @@ try {
         $isPlaylist = ($info._type -eq 'playlist') -and ($info.entries) -and (@($info.entries).Count -gt 1)
 
         if ($isPlaylist) {
-            Show-PlaylistScreen -Info $info
-            continue   # kembali ke welcome
+            # Deteksi otomatis: playlist musik atau playlist video?
+            $forceAudio = $false
+
+            if (Is-YouTubeMusicUrl -Url $url) {
+                # YT Music URL -> pasti audio
+                $forceAudio = $true
+            }
+            elseif (Is-LikelyMusicPlaylist -Info $info) {
+                # Playlist YouTube biasa yang KEMUNGKINAN musik -> tanya user
+                $choice = Show-PlaylistTypeChoice -Info $info
+                if ($null -eq $choice) { continue }   # user tekan Esc
+                $forceAudio = ($choice -eq 'mp3')
+            }
+            # else: playlist video biasa, langsung download pakai setting user
+
+            Show-PlaylistScreen -Info $info -ForceAudio $forceAudio
+            continue
         }
 
         # single video: pastikan full info
@@ -2036,24 +2138,9 @@ try {
         # Deteksi apakah platform mendukung full feature (audio track & subtitle)
         $fullFeature = Is-FullFeaturePlatform -Url $url
 
-        # === YOUTUBE MUSIC: auto MP3, skip format screen ===
-        # YouTube Music isinya audio-only + sudah punya thumbnail album art.
-        # Langsung download MP3 dengan cover + metadata, tanpa tanya resolusi/audio track.
-        $isYTMusic = Is-YouTubeMusicUrl -Url $url
-        if ($isYTMusic) {
-            # Paksa format ke mp3 untuk sesi ini (tanpa mengubah setting user)
-            $savedFormat = $script:Settings.Format
-            $script:Settings.Format = 'mp3'
-
-            # Playlist YT Music? Pakai playlist screen dengan force-mp3
-            if ($isPlaylist) {
-                # Show-PlaylistScreen pakai flag force-mp3
-                [void](Show-PlaylistScreen -Info $info -ForceAudio $true)
-                $script:Settings.Format = $savedFormat
-                continue
-            }
-
-            # Single track: skip format screen, langsung download mp3
+        # === YOUTUBE MUSIC (single track): auto MP3, skip format screen ===
+        # Playlist YT Music sudah di-handle di blok $isPlaylist di atas.
+        if ((Is-YouTubeMusicUrl -Url $url) -and -not $isPlaylist) {
             $result = Show-DownloadScreen -URL $url -FullFeature $false -ForceAudio $true
 
             $errMsg = ""
@@ -2067,7 +2154,6 @@ try {
                 }
             }
             $again = Show-DoneScreen -Result $result -Message $errMsg
-            $script:Settings.Format = $savedFormat
             if (-not $again) { $running = $false }
             continue
         }
