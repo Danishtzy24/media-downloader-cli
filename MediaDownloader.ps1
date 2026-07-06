@@ -1,20 +1,18 @@
-#>
+<#
 .SYNOPSIS
-    Media Downloader v1.1 - Enhanced Terminal UI (Clean Progress Bar)
+    Media Downloader v1.0 - Terminal UI
 .DESCRIPTION
     Downloader universal untuk YouTube / TikTok / Twitter / Instagram / Bstation / Gambar.
     - UI statis anti-kedip
-    - Progress bar real-time (MURNI - tanpa kode aneh)
+    - Progress bar real-time
     - Playlist checklist
     - MP4 / MP3 / Image
     - Auto-update dari GitHub
     - Auto-cookies dari browser
     - Smart blocklist (bedakan error server vs private/cookies)
-    - Diagnostics mode
-    - Cache management
 #>
 
-$script:AppVersion = '1.1'
+$script:AppVersion = '1.0'
 
 $ErrorActionPreference = 'Stop'
 
@@ -113,20 +111,22 @@ function Classify-Error {
     param([string]$ErrorText)
     if (-not $ErrorText) { return 'unknown' }
 
+    # Auth / privacy errors -> JANGAN blok, ini masalah user (butuh login)
     $authPatterns = @(
         'private video', 'this video is private', 'members-only',
         'login required', 'sign in to confirm', 'requires login',
         'not authorized', 'authorization', 'authentication',
         'cookies', 'not authenticated', 'age.?restricted', 'age.restricted',
-        'confirm your age', 'this account is private', 'private account',
-        'only available to', 'restricted account', 'subscribers only',
-        'premium', 'paywall', 'log in to view', 'login to view',
-        'this post', 'private profile'
+        'confirm your age', 'requested content is not available',
+        'this account is private', 'private account', 'only available to',
+        'restricted account', 'subscribers only', 'premium', 'paywall',
+        'log in to view', 'login to view', 'this post', 'private profile'
     )
     foreach ($p in $authPatterns) {
         if ($ErrorText -imatch $p) { return 'auth' }
     }
 
+    # Server / provider / geo -> BOLEH blok
     $serverPatterns = @(
         '5\d\d\s', 'server error', 'internal server', 'bad gateway',
         'service unavailable', 'gateway timeout', 'temporarily unavailable',
@@ -138,6 +138,7 @@ function Classify-Error {
         if ($ErrorText -imatch $p) { return 'server' }
     }
 
+    # Network -> retry-able, jangan blok
     $netPatterns = @('timed out', 'connection reset', 'temporarily failed', 'network is unreachable', 'ssl', 'certificate')
     foreach ($p in $netPatterns) {
         if ($ErrorText -imatch $p) { return 'network' }
@@ -162,6 +163,8 @@ function Is-FullFeaturePlatform {
     return ($Url -match 'youtube\.com|youtu\.be') -and ($Url -notmatch 'music\.youtube\.com')
 }
 
+# YouTube Music = audio only (sudah bawaan thumbnail album art)
+# Otomatis langsung MP3 tanpa tanya user.
 function Is-YouTubeMusicUrl {
     param([string]$Url)
     return ($Url -match 'music\.youtube\.com')
@@ -174,6 +177,8 @@ $script:ConfigDir    = Join-Path $env:USERPROFILE '.media-downloader'
 
 # =====================================================
 # AUTO-DETECT MEDIA PLAYER UNTUK AUTOPLAY
+# Scan registry "App Paths" untuk player yang umum dipakai.
+# Default fitur ini OFF - user harus aktifkan manual di Settings (F2).
 # =====================================================
 $script:KnownPlayers = @(
     @{ Name = 'VLC Media Player';      Exe = 'vlc.exe' }
@@ -190,6 +195,8 @@ $script:KnownPlayers = @(
     @{ Name = 'Windows Media Player';  Exe = 'wmplayer.exe' }
 )
 
+# Cari player yang benar-benar terpasang di PC user via registry "App Paths".
+# Aman: hanya membaca registry, tidak pernah menulis / mengubah apapun.
 function Get-InstalledMediaPlayers {
     $found = @()
     $appPathsRoots = @(
@@ -211,13 +218,15 @@ function Get-InstalledMediaPlayers {
                         }
                     }
                 } catch {}
-                break
+                break   # sudah ketemu exe ini di salah satu root, tidak perlu cek root lain
             }
         }
     }
     return $found
 }
 
+# Baca player DEFAULT dari Windows Settings (registry UserChoice per-ekstensi).
+# Jadi kalau user set VLC sebagai default .mp4 di Settings Windows, kita pakai VLC.
 function Get-WindowsDefaultMediaPlayer {
     param([string]$Extension = '.mp4')
 
@@ -226,6 +235,7 @@ function Get-WindowsDefaultMediaPlayer {
         if (Test-Path $userChoicePath) {
             $progId = (Get-ItemProperty -Path $userChoicePath -Name 'ProgId' -ErrorAction SilentlyContinue).ProgId
             if ($progId) {
+                # HKCR perlu di-mount sebagai drive kalau belum ada
                 if (-not (Get-PSDrive -Name HKCR -ErrorAction SilentlyContinue)) {
                     New-PSDrive -Name HKCR -PSProvider Registry -Root HKEY_CLASSES_ROOT -Scope Script -ErrorAction SilentlyContinue | Out-Null
                 }
@@ -241,11 +251,17 @@ function Get-WindowsDefaultMediaPlayer {
         }
     } catch {}
 
+    # Fallback: Windows Media Player klasik
     $wmp = "$env:ProgramFiles\Windows Media Player\wmplayer.exe"
     if (Test-Path $wmp) { return $wmp }
     return $null
 }
 
+# Jalankan file media. Prioritas:
+# 1. 'off'      -> tidak melakukan apa-apa
+# 2. 'default'  -> pakai player default dari WINDOWS SETTINGS (per ekstensi file)
+# 3. path exe   -> player spesifik pilihan user di Settings aplikasi
+# Selalu punya fallback aman, tidak pernah crash.
 function Invoke-AutoplayMedia {
     param([string]$FilePath)
 
@@ -255,6 +271,7 @@ function Invoke-AutoplayMedia {
 
     try {
         if ($choice -eq 'default') {
+            # Baca default player dari Windows Settings sesuai ekstensi file
             $ext = [System.IO.Path]::GetExtension($FilePath)
             $defaultExe = Get-WindowsDefaultMediaPlayer -Extension $ext
             if ($defaultExe -and (Test-Path $defaultExe)) {
@@ -267,6 +284,7 @@ function Invoke-AutoplayMedia {
             Start-Process -FilePath $choice -ArgumentList "`"$FilePath`"" -ErrorAction Stop
         }
         else {
+            # Player yang tersimpan sudah tidak ada di sistem -> fallback aman
             Invoke-Item -Path $FilePath -ErrorAction SilentlyContinue
         }
     } catch {
@@ -274,6 +292,7 @@ function Invoke-AutoplayMedia {
     }
 }
 
+# Cari file media yang PALING BARU dibuat di folder tujuan (hasil download barusan)
 function Get-LatestDownloadedFile {
     param([string]$Dir)
     if (-not (Test-Path $Dir)) { return $null }
@@ -287,10 +306,11 @@ function Get-LatestDownloadedFile {
 
 # =====================================================
 # BLOCKLIST PERMANEN (per platform)
+# Kalau download gagal berulang, blok platform-nya
 # =====================================================
 $script:BlocklistPath = Join-Path $script:ConfigDir 'blocklist.json'
-$script:Blocklist = @{}
-$script:FailThreshold = 2
+$script:Blocklist = @{}   # key = platform name, value = @{ Blocked=$true; Reason=''; FailCount=0 }
+$script:FailThreshold = 2  # 2x gagal berturut-turut = blok
 
 function Load-Blocklist {
     if (Test-Path $script:BlocklistPath) {
@@ -329,9 +349,10 @@ function Get-BlockReason {
 function Record-PlatformFail {
     param([string]$Platform, [string]$Reason = '', [string]$ErrorText = '')
 
+    # Klasifikasi: kalau error = auth/private/cookies -> JANGAN blok, itu bukan error server
     $errType = Classify-Error -ErrorText $ErrorText
     if ($errType -eq 'auth' -or $errType -eq 'network') {
-        return
+        return   # skip - ini bukan salah platform
     }
 
     if (-not $script:Blocklist.ContainsKey($Platform)) {
@@ -370,16 +391,22 @@ $script:SaveDir = $defaultDir
 # --- Settings (persisten) ---
 $script:SettingsPath = Join-Path $script:ConfigDir 'settings.json'
 
+# AudioLang: 'original' atau kode bahasa ('id','en','ar',...)
+# MaxRes: 0 = best, atau 2160/1440/1080/720/480/360
 $script:Settings = [PSCustomObject]@{
     AudioLang = 'original'
     MaxRes    = 0
     SaveDir   = $defaultDir
-    Format    = 'mp4'
-    Cookies   = 'off'
-    AutoplayPlayer = 'default'
-    AutoUpdate     = $true
+    Format    = 'mp4'   # 'mp4' atau 'mp3'
+    Cookies   = 'off'  # 'off' | 'auto' | 'chrome' | 'edge' | 'firefox' | 'brave' | 'opera' | 'vivaldi'
+                       # Default OFF: cookies hanya diaktifkan manual di Settings kalau memang perlu (video private/login).
+                       # Kalau 'on' terus, browser yang sedang terbuka bisa mengunci file cookie dan
+                       # menyebabkan SEMUA fetch (termasuk video publik) gagal total.
+    AutoplayPlayer = 'default'  # 'off' | 'default' (player default Windows) | '<path exe player>'
+    AutoUpdate     = $true      # auto-cek GitHub tiap start; kalau ada versi baru -> update & restart
 }
 
+# Opsi cookies
 $script:CookieOptions = @(
     @{ Code = 'off';     Label = 'Off (tanpa cookie)' }
     @{ Code = 'auto';    Label = 'Auto-detect browser' }
@@ -391,6 +418,7 @@ $script:CookieOptions = @(
     @{ Code = 'vivaldi'; Label = 'Vivaldi' }
 )
 
+# Deteksi browser terpasang -> return kode browser untuk --cookies-from-browser
 function Detect-Browser {
     $candidates = @(
         @{ Code = 'chrome';  Path = "$env:LOCALAPPDATA\Google\Chrome\User Data" }
@@ -483,174 +511,6 @@ function Get-ResLabel {
 }
 
 # ============================================
-# DIAGNOSTICS FUNCTION
-# ============================================
-
-function Show-Diagnostics {
-    Clear-Screen
-    Write-Host ""
-    Write-Host "Media Downloader - Diagnostics" -ForegroundColor Cyan
-    Write-Host "=============================" -ForegroundColor Gray
-    Write-Host ""
-    
-    $allOk = $true
-    
-    Write-Host "PowerShell Version: " -NoNewline
-    Write-Host $PSVersionTable.PSVersion.ToString() -ForegroundColor Yellow
-    
-    Write-Host "Script Version: " -NoNewline
-    Write-Host "v$script:AppVersion" -ForegroundColor Yellow
-    
-    Write-Host ""
-    Write-Host "Checking yt-dlp..." -ForegroundColor Gray
-    $ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
-    if ($ytDlp) {
-        Write-Host "  [OK] yt-dlp found: " -NoNewline -ForegroundColor Green
-        Write-Host $ytDlp.Source -ForegroundColor Gray
-        try {
-            $version = & yt-dlp --version 2>$null
-            Write-Host "       Version: $version" -ForegroundColor Gray
-        } catch {}
-    } else {
-        Write-Host "  [FAIL] yt-dlp not found in PATH" -ForegroundColor Red
-        $allOk = $false
-    }
-    
-    Write-Host ""
-    Write-Host "Checking ffmpeg..." -ForegroundColor Gray
-    $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if ($ffmpeg) {
-        Write-Host "  [OK] ffmpeg found: " -NoNewline -ForegroundColor Green
-        Write-Host $ffmpeg.Source -ForegroundColor Gray
-    } else {
-        Write-Host "  [FAIL] ffmpeg not found in PATH" -ForegroundColor Red
-        $allOk = $false
-    }
-    
-    Write-Host ""
-    Write-Host "Checking settings..." -ForegroundColor Gray
-    $settingsPath = $script:SettingsPath
-    if (Test-Path $settingsPath) {
-        Write-Host "  [OK] Settings file found" -ForegroundColor Green
-        try {
-            $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
-            Write-Host "       Save Dir: $($settings.SaveDir)" -ForegroundColor Gray
-            Write-Host "       Format: $($settings.Format)" -ForegroundColor Gray
-            Write-Host "       Cookies: $($settings.Cookies)" -ForegroundColor Gray
-        } catch {
-            Write-Host "  [WARN] Settings file corrupted, will be recreated" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "  [INFO] Settings file not found (will be created on first run)" -ForegroundColor Yellow
-    }
-    
-    Write-Host ""
-    Write-Host "Checking blocklist..." -ForegroundColor Gray
-    if (Test-Path $script:BlocklistPath) {
-        $blocked = @($script:Blocklist.Keys | Where-Object { $script:Blocklist[$_].Blocked -eq $true })
-        if ($blocked.Count -gt 0) {
-            Write-Host "  [INFO] Blocked platforms: $($blocked -join ', ')" -ForegroundColor Yellow
-        } else {
-            Write-Host "  [OK] No blocked platforms" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "  [OK] No blocklist file (no platforms blocked)" -ForegroundColor Green
-    }
-    
-    Write-Host ""
-    Write-Host "Checking internet connectivity..." -ForegroundColor Gray
-    try {
-        $testConnection = Test-NetConnection -ComputerName "github.com" -Port 443 -InformationLevel Quiet -WarningAction SilentlyContinue -ErrorAction Stop
-        if ($testConnection) {
-            Write-Host "  [OK] Internet connection available" -ForegroundColor Green
-        }
-    } catch {
-        try {
-            $testPing = Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet -ErrorAction Stop
-            if ($testPing) {
-                Write-Host "  [OK] Internet connection available" -ForegroundColor Green
-            }
-        } catch {
-            Write-Host "  [FAIL] No internet connection" -ForegroundColor Red
-            $allOk = $false
-        }
-    }
-    
-    Write-Host ""
-    Write-Host "Checking for updates..." -ForegroundColor Gray
-    $updateUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/version.txt"
-    try {
-        $response = Invoke-WebRequest -Uri $updateUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        $remoteVersion = $response.Content.Trim()
-        if ($remoteVersion -and $remoteVersion -ne $script:AppVersion) {
-            Write-Host "  [INFO] Update available: v$remoteVersion" -ForegroundColor Yellow
-            Write-Host "         Run 'Media update' to update" -ForegroundColor Gray
-        } elseif ($remoteVersion) {
-            Write-Host "  [OK] You have the latest version" -ForegroundColor Green
-        }
-    } catch {
-        Write-Host "  [WARN] Could not check for updates (offline or GitHub unavailable)" -ForegroundColor Yellow
-    }
-    
-    Write-Host ""
-    Write-Host "=============================" -ForegroundColor Gray
-    if ($allOk) {
-        Write-Host "All checks passed!" -ForegroundColor Green
-    } else {
-        Write-Host "Some checks failed. Please review above." -ForegroundColor Yellow
-    }
-    Write-Host ""
-    Write-Host "Press any key to continue..." -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-}
-
-# ============================================
-# CACHE CLEAR FUNCTION
-# ============================================
-
-function Clear-Cache {
-    Write-Host ""
-    Write-Host "Clearing cache..." -ForegroundColor Cyan
-    Write-Host ""
-    
-    $cleared = 0
-    
-    $cacheDir = Join-Path $script:ConfigDir "cache"
-    if (Test-Path $cacheDir) {
-        Remove-Item $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "[OK] Local cache cleared" -ForegroundColor Green
-        $cleared++
-    }
-    
-    try {
-        $output = & yt-dlp --rm-cache-dir 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] yt-dlp cache cleared" -ForegroundColor Green
-            $cleared++
-        }
-    } catch {
-        Write-Host "[INFO] yt-dlp cache not found or already cleared" -ForegroundColor Yellow
-    }
-    
-    $tempPattern = Join-Path $env:TEMP "MediaDownloader_*"
-    $tempFiles = Get-Item -Path $tempPattern -ErrorAction SilentlyContinue
-    if ($tempFiles) {
-        $tempFiles | Remove-Item -Force -ErrorAction SilentlyContinue
-        Write-Host "[OK] Temp files cleared" -ForegroundColor Green
-        $cleared++
-    }
-    
-    Write-Host ""
-    if ($cleared -gt 0) {
-        Write-Host "Cache clearing complete!" -ForegroundColor Green
-    } else {
-        Write-Host "No cache found to clear." -ForegroundColor Yellow
-    }
-    Write-Host ""
-    Start-Sleep -Seconds 2
-}
-
-# ============================================
 # UI HELPERS (SINGLE-WRITE = ZERO FLICKER)
 # ============================================
 
@@ -676,6 +536,7 @@ function Write-At {
     Out-Ansi ((Ansi-Pos $Row $Col) + $Text)
 }
 
+# Tulis 1 baris penuh: clear line + teks, dalam SATU write (anti kedip)
 function Write-Line {
     param([int]$Row, [string]$Text = '', [int]$Col = 0)
     Out-Ansi ((Ansi-Pos $Row 0) + "$ESC[2K" + (Ansi-Pos $Row $Col) + $Text)
@@ -725,12 +586,12 @@ function Write-PanelLine {
 function Draw-Footer {
     param([string]$Info = '~')
     $row = (Get-TermHeight) - 1
-    $ver = "v$script:AppVersion"
+    $ver = "v$($script:AppVersion)"
     Out-Ansi ((Ansi-Pos $row 0) + "$ESC[2K" + (Ansi-Pos $row 1) + "$FG_DIM$Info$RESET" + (Ansi-Pos $row ((Get-TermWidth) - $ver.Length - 2)) + "$FG_DIM$ver$RESET")
 }
 
 # ============================================
-# LOGO "MEDIA"
+# LOGO "MEDIA" (auto-hide di terminal kecil)
 # ============================================
 
 $rawLogo = @(
@@ -850,7 +711,9 @@ function Parse-Formats {
     }
 }
 
+# Terapkan preferensi settings sebagai default selection
 function Apply-SettingsToSelection {
+    # Resolusi: terbesar yang <= MaxRes; kalau tidak ada, yang terkecil tersedia
     $script:SelRes = 0
     if ($script:Settings.MaxRes -gt 0 -and $script:Resolutions.Count -gt 0) {
         $found = -1
@@ -861,6 +724,7 @@ function Apply-SettingsToSelection {
         else { $script:SelRes = $script:Resolutions.Count - 1 }
     }
 
+    # Audio: cari bahasa preferensi; fallback Original (index 0)
     $script:SelAudio = 0
     if ($script:Settings.AudioLang -ne 'original' -and $script:AudioTracks.Count -gt 0) {
         for ($i = 0; $i -lt $script:AudioTracks.Count; $i++) {
@@ -871,6 +735,7 @@ function Apply-SettingsToSelection {
     $script:SelSub = 0
 }
 
+# Format string otomatis (untuk playlist) berdasarkan settings
 function Build-AutoFormat {
     $r = [int]$script:Settings.MaxRes
     $lang = [string]$script:Settings.AudioLang
@@ -889,9 +754,13 @@ function Build-AutoFormat {
 }
 
 # ============================================
-# CORE DOWNLOAD (CLEAN PROGRESS BAR - NO CODE LEAK)
+# CORE DOWNLOAD (async read + cancel + progress)
+# Return: 'ok' | 'fail' | 'cancel'
 # ============================================
 
+# =====================================================
+# IMAGE DOWNLOAD (langsung via .NET WebClient)
+# =====================================================
 function Invoke-ImageDownload {
     param([string]$URL)
 
@@ -935,7 +804,7 @@ function Invoke-Download {
         [int]$BarRow,
         [int]$StatsRow,
         [string]$Label = '',
-        [string]$OutputFormat = 'mp4'
+        [string]$OutputFormat = 'mp4'   # 'mp4' atau 'mp3'
     )
 
     $outputPath = Join-Path $script:SaveDir "%(title)s.%(ext)s"
@@ -951,22 +820,31 @@ function Invoke-Download {
     $ytArgs.Add("--progress-template")
     $ytArgs.Add("download:PROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s")
 
+    # Auto cookies (untuk video login-required / premium / private)
     $ck = Get-CookieBrowserForYtdlp
     if ($ck) { $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($ck) }
 
     if ($OutputFormat -eq 'mp3') {
+        # AUDIO ONLY MODE - dengan COVER ART lengkap
         $ytArgs.Add("-f"); $ytArgs.Add("bestaudio/best")
         $ytArgs.Add("--extract-audio")
         $ytArgs.Add("--audio-format"); $ytArgs.Add("mp3")
-        $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")
+        $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")   # kualitas terbaik
+
+        # COVER ART: Convert ke jpg & embed ke MP3 dengan crop 1:1 murni
+        # Kita potong bagian kiri dan kanan (crop horizontal) agar artwork aslinya (yang di tengah) 
+        # melebar penuh mengisi 100% area persegi tanpa border baris putih/hitam di atas dan bawah.
         $ytArgs.Add("--convert-thumbnails"); $ytArgs.Add("jpg")
         $ytArgs.Add("--embed-thumbnail")
         $ytArgs.Add("--ppa")
         $ytArgs.Add("ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -vf scale=-1:600,crop=600:600")
+
+        # METADATA: judul, artist, album, tanggal -> terbaca oleh semua music player
         $ytArgs.Add("--embed-metadata")
         $ytArgs.Add("--parse-metadata"); $ytArgs.Add("%(artist,uploader,channel)s:%(meta_artist)s")
         $ytArgs.Add("--parse-metadata"); $ytArgs.Add("%(album,playlist_title,title)s:%(meta_album)s")
     } else {
+        # VIDEO MODE
         $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
         $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
 
@@ -1002,26 +880,19 @@ function Invoke-Download {
     $labelPrefix = if ($Label) { "$Label   $GL_DOT   " } else { '' }
     $cancelled = $false
 
-    # Render frame awal (SATU WRITE - anti flicker)
+    # frame awal (satu write)
     Out-Ansi ((Ansi-Pos $BarRow 0) + "$ESC[2K" + (Ansi-Pos $BarRow $barCol) + $FG_DIM + ($GL_LIGHT * $barWidth) + $RESET + "  $FG_WHITE${BOLD}0%   $RESET")
     Write-Center -Row $StatsRow -Text "$FG_GRAY${labelPrefix}menghubungkan...   ${FG_DIM}(esc batal)$RESET"
 
-    # ============================================
-    # RENDER BAR - MURNI, TANPA KODE ANEH
-    # ============================================
     function Render-Bar {
         param([double]$Pct, [string]$Stats)
         $pctInt = [Math]::Min(100, [Math]::Max(0, [Math]::Round($Pct)))
         $filled = [Math]::Floor($barWidth * $pctInt / 100)
         $empty  = $barWidth - $filled
-        
-        # SATU WRITE untuk progress bar (posisi tetap, tidak bergerak)
         $s = (Ansi-Pos $BarRow 0) + "$ESC[2K" + (Ansi-Pos $BarRow $barCol) +
              $FG_BLUE + ($GL_FULL * $filled) + $FG_DIM + ($GL_LIGHT * $empty) + $RESET +
              "  $FG_WHITE$BOLD$(([string]$pctInt + '%').PadRight(5))$RESET"
         Out-Ansi $s
-        
-        # Stats di baris TERPISAH (bawah progress bar)
         if ($Stats) {
             $statsFull = Limit-Text -Text ($labelPrefix + $Stats) -Max ($tw - 4)
             Write-Center -Row $StatsRow -Text "$FG_GRAY$statsFull$RESET" -VisibleLen $statsFull.Length
@@ -1052,6 +923,7 @@ function Invoke-Download {
             $readTask = $proc.StandardOutput.ReadLineAsync()
         }
 
+        # tunggu max 120ms, sambil cek keyboard
         $done = $false
         try { $done = $readTask.Wait(120) } catch { $done = $true }
 
@@ -1072,9 +944,6 @@ function Invoke-Download {
         if ($null -eq $line) { if ($proc.HasExited) { break } else { continue } }
         if (-not $line) { continue }
 
-        # ============================================
-        # PARSE PROGRESS - FILTER HANYA LINE PROG
-        # ============================================
         if ($line -match 'PROG\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$') {
             $pctStr   = $matches[1].Trim() -replace '%',''
             $speed    = $matches[2].Trim()
@@ -1117,7 +986,6 @@ function Invoke-Download {
         elseif ($line -match '\[Merger\]|\[VideoRemuxer\]|\[VideoConvertor\]|\[EmbedSubtitle\]|\[FixupM3u8\]') {
             Render-Bar -Pct 100 -Stats 'menggabungkan audio + video (ffmpeg)...'
         }
-        # LINE LAIN DIABAIKAN - tidak ditampilkan sama sekali (tidak ada kode aneh)
     }
 
     if ($cancelled) {
@@ -1135,7 +1003,7 @@ function Invoke-Download {
 }
 
 # ============================================
-# SCREEN 1: WELCOME
+# SCREEN 1: WELCOME (URL + FOLDER + PLATFORM + F2 SETTINGS)
 # ============================================
 
 function Show-WelcomeScreen {
@@ -1149,7 +1017,8 @@ function Show-WelcomeScreen {
     if ($showLogo) {
         $logoStart = [Math]::Max(1, [Math]::Floor($h / 2) - 10)
         Draw-Logo -StartRow $logoStart
-        Write-Center -Row ($logoStart + 6) -Text "$FG_DIM Media Downloader $FG_CYAN v$script:AppVersion$RESET" -VisibleLen (20 + $script:AppVersion.Length)
+        # Tag versi kecil di bawah logo
+        Write-Center -Row ($logoStart + 6) -Text "$FG_DIM Media Downloader $FG_CYAN v$($script:AppVersion)$RESET" -VisibleLen (20 + $script:AppVersion.Length)
         $panelRow = $logoStart + 8
     } else {
         $panelRow = [Math]::Max(1, [Math]::Floor($h / 2) - 4)
@@ -1168,7 +1037,7 @@ function Show-WelcomeScreen {
         Write-Center -Row ($folderRow + 4) -Text "$FG_ORANGE$GL_BULLET$RESET  $FG_GRAY$prefText$RESET"
     }
     if (($folderRow + 5) -lt ($h - 1)) {
-        Write-Center -Row ($folderRow + 5) -Text "$FG_DIM ketik 'update' untuk cek versi baru, 'doctor' untuk diagnostik$RESET"
+        Write-Center -Row ($folderRow + 5) -Text "$FG_DIM ketik 'update' untuk cek versi baru$RESET"
     }
 
     $urlBuf   = ''
@@ -1193,7 +1062,7 @@ function Show-WelcomeScreen {
         }
 
         if ($urlBuf -ne $lastUrl -or $field -ne $lastField) {
-            $urlMax = $m.Inner - 2
+            $urlMax = $m.Inner - 2   # sisakan space untuk kursor blok
             $curPlatform = $script:Platforms[$script:PlatformIdx]
             $curBlocked = Is-PlatformBlocked -Platform $curPlatform.Name
 
@@ -1203,6 +1072,7 @@ function Show-WelcomeScreen {
 
             if (-not $urlBuf) {
                 if ($curBlocked) {
+                    # Shadow-text khusus: arahkan user ketik "reset" untuk buka blokir
                     $shown = "Diblokir. Ketik 'reset' untuk buka blokir platform ini"
                     $placeholderColor = $FG_RED
                 } else {
@@ -1211,6 +1081,7 @@ function Show-WelcomeScreen {
                 $isPlaceholder = $true
             }
 
+            # Anti-spill: pastikan teks tidak melebihi lebar panel (mencegah native scroll)
             if ($shown.Length -gt $urlMax) {
                 if ($isPlaceholder) { 
                     $shown = Limit-Text -Text $shown -Max $urlMax 
@@ -1243,6 +1114,7 @@ function Show-WelcomeScreen {
         $key = [Console]::ReadKey($true)
 
         if ($key.Key -eq 'Enter') {
+            # Perintah "reset": buka blokir platform yang sedang aktif
             if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'reset') {
                 $platform = $script:Platforms[$script:PlatformIdx]
                 if (Is-PlatformBlocked -Platform $platform.Name) {
@@ -1252,37 +1124,23 @@ function Show-WelcomeScreen {
                     Write-Line -Row ($inputRow + 1) -Text ''
                 }
                 $urlBuf = ''
-                $lastIdx = -1
+                $lastIdx = -1   # paksa redraw label & placeholder
                 $lastUrl = $null
                 continue
             }
 
+            # Perintah "update": cek update manual dari GitHub
             if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'update') {
                 Write-Center -Row ($inputRow + 1) -Text "$FG_CYAN$($script:SpinChars[0]) Mengecek update dari GitHub...$RESET"
                 $upResult = Check-Update -Manual $true
+                # Kalau ada update, Show-UpdateScreen sudah exit sendiri. Sampai sini artinya tidak update.
                 if ($upResult -eq 'uptodate') {
-                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK Sudah versi terbaru (v$script:AppVersion)$RESET"
+                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK Sudah versi terbaru (v$($script:AppVersion))$RESET"
                 } elseif ($upResult -eq 'error') {
                     Write-Center -Row ($inputRow + 1) -Text "$FG_RED$GL_CROSS Gagal cek update. Cek koneksi internet.$RESET"
                 }
                 Start-Sleep -Milliseconds 1500
                 Write-Line -Row ($inputRow + 1) -Text ''
-                $urlBuf = ''
-                $lastIdx = -1
-                $lastUrl = $null
-                continue
-            }
-
-            if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'doctor') {
-                Show-Diagnostics
-                $urlBuf = ''
-                $lastIdx = -1
-                $lastUrl = $null
-                continue
-            }
-
-            if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'cache') {
-                Clear-Cache
                 $urlBuf = ''
                 $lastIdx = -1
                 $lastUrl = $null
@@ -1302,7 +1160,7 @@ function Show-WelcomeScreen {
         elseif ($key.Key -eq 'Escape') { return $null }
         elseif ($key.Key -eq 'F2') {
             Show-SettingsScreen
-            return 'RELOAD'
+            return 'RELOAD'   # kembali & redraw welcome
         }
         elseif ($key.Key -eq 'Tab') { $field = ($field + 1) % 2 }
         elseif ($key.Key -eq 'Backspace') {
@@ -1345,6 +1203,7 @@ function Show-SettingsScreen {
     Write-Center -Row $top -Text "$FG_WHITE${BOLD}Settings$RESET" -VisibleLen 8
     Write-Center -Row ($top + 10) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   $GL_LEFT$GL_RIGHT ubah   enter edit folder   esc simpan & kembali$RESET"
 
+    # index posisi
     $audioIdx = 0
     for ($i = 0; $i -lt $script:AudioLangOptions.Count; $i++) {
         if ($script:AudioLangOptions[$i].Code -eq $script:Settings.AudioLang) { $audioIdx = $i; break }
@@ -1360,6 +1219,7 @@ function Show-SettingsScreen {
         if ($script:CookieOptions[$i].Code -eq $script:Settings.Cookies) { $cookieIdx = $i; break }
     }
 
+    # === Bangun daftar player: Off, Default Windows, lalu semua player terdeteksi ===
     $detectedPlayers = Get-InstalledMediaPlayers
     $playerOptions = @(
         @{ Code = 'off';     Label = 'Off (tidak autoplay)' }
@@ -1370,6 +1230,7 @@ function Show-SettingsScreen {
     for ($i = 0; $i -lt $playerOptions.Count; $i++) {
         if ($playerOptions[$i].Code -eq $script:Settings.AutoplayPlayer) { $playerIdx = $i; break }
     }
+    # Kalau player yang tersimpan sudah tidak terdeteksi (mis. sudah di-uninstall), fallback ke Off
     if ($playerIdx -eq 0 -and $script:Settings.AutoplayPlayer -ne 'off' -and $script:Settings.AutoplayPlayer -ne 'default') {
         $isKnown = $false
         foreach ($po in $playerOptions) { if ($po.Code -eq $script:Settings.AutoplayPlayer) { $isKnown = $true } }
@@ -1380,7 +1241,7 @@ function Show-SettingsScreen {
     $updateIdx = if ($script:Settings.AutoUpdate) { 0 } else { 1 }
     $updateOptions = @('On (cek tiap start)', 'Off (manual)')
 
-    $sel = 0
+    $sel = 0          # 0=format, 1=audio, 2=res, 3=cookies, 4=autoplay, 5=autoupdate, 6=folder
     $editMode = $false
     $dirty = $true
     $totalRows = 7
@@ -1393,7 +1254,9 @@ function Show-SettingsScreen {
             $ckLabel = $script:CookieOptions[$cookieIdx].Label
             $plLabel = $playerOptions[$playerIdx].Label
 
+            # label "Folder          " = 16 char, sisakan 1 utk kursor
             $fMax = [Math]::Max(8, $m.Inner - 17)
+            # tampilkan BAGIAN AKHIR path saat diedit (posisi ketik selalu terlihat)
             $fText = $folderBuf
             if ($fText.Length -gt $fMax) {
                 if ($editMode) { $fText = '...' + $fText.Substring($fText.Length - ($fMax - 3)) }
@@ -1519,6 +1382,8 @@ function Invoke-FetchJson {
     $job = Start-Job -ScriptBlock {
         param($u, $fa, $ck)
 
+        # Coba dengan cookies dulu (kalau diminta). Kalau gagal / kosong, fallback TANPA cookies.
+        # Ini mencegah 1 masalah cookie (browser terkunci dll) membuat SEMUA fetch gagal total.
         if ($ck) {
             $errOutput = & yt-dlp -J $fa --cookies-from-browser $ck --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
             $json = $errOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
@@ -1527,6 +1392,7 @@ function Invoke-FetchJson {
             if ($json) {
                 return @{ Success = $true; Data = ($json -join ''); Error = '' }
             }
+            # fallback tanpa cookies
             $errOutput2 = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
             $json2 = $errOutput2 | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
             $errText2 = ($errOutput2 | Where-Object { $_ -isnot [string] -or -not $_.TrimStart().StartsWith('{') }) -join "`n"
@@ -1580,7 +1446,7 @@ function Invoke-FetchJson {
 }
 
 # ============================================
-# SCREEN 3: FORMAT
+# SCREEN 3: FORMAT (single video)
 # ============================================
 
 function Show-FormatScreen {
@@ -1612,6 +1478,7 @@ function Show-FormatScreen {
 
     $colStart = $startRow + 3
 
+    # Kolom count berbeda tergantung platform
     $colCount = if ($FullFeature) { 3 } else { 2 }
     $lists = if ($FullFeature) { @($script:Resolutions, $script:AudioTracks, $script:SubtitleList) } else { @($script:FormatOptions, $script:Resolutions) }
     $headers = if ($FullFeature) { @('Resolusi', 'Audio', 'Subtitle') } else { @('Format', 'Resolusi') }
@@ -1628,9 +1495,11 @@ function Show-FormatScreen {
     Apply-SettingsToSelection
     $script:ActiveCol = 0
 
+    # Sinkronisasi selection: kolom pertama simple = format
     if (-not $FullFeature) {
-        $script:SelRes = if ($script:Settings.Format -eq 'mp3') { 1 } else { 0 }
-        $script:SelAudio = 0
+        $script:SelRes = if ($script:Settings.Format -eq 'mp3') { 1 } else { 0 }  # sementara pakai SelRes utk format
+        $script:SelAudio = 0  # sementara pakai SelAudio utk resolusi
+        # Simpan resolusi terpilih dari settings ke SelAudio
         if ($script:Settings.MaxRes -gt 0) {
             for ($i = 0; $i -lt $script:Resolutions.Count; $i++) {
                 if ($script:Resolutions[$i].Height -le $script:Settings.MaxRes) { $script:SelAudio = $i; break }
@@ -1642,6 +1511,7 @@ function Show-FormatScreen {
 
     while ($true) {
         if ($dirty) {
+            # Header
             $sb = New-Object System.Text.StringBuilder
             for ($k = 0; $k -lt $colCount; $k++) {
                 $htxt = if ($script:ActiveCol -eq $k) { "$FG_BLUE${BOLD}$($headers[$k])$RESET" } else { "${FG_GRAY}$($headers[$k])$RESET" }
@@ -1716,6 +1586,7 @@ function Show-FormatScreen {
     }
 }
 
+# Opsi format global
 $script:FormatOptions = @(
     [PSCustomObject]@{ Label = 'MP4 (Video)'; Value = 'mp4' }
     [PSCustomObject]@{ Label = 'MP3 (Audio)'; Value = 'mp3' }
@@ -1744,11 +1615,13 @@ function Show-DownloadScreen {
     }
     Write-PanelLine -Row ($centerRow - 3) -Col $m.Col -Width $m.Width -Text "$FG_WHITE$titleText$RESET"
 
+    # === YOUTUBE MUSIC: force MP3 dengan cover art + metadata ===
     if ($ForceAudio) {
         return Invoke-Download -URL $URL -FormatString 'bestaudio/best' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp3'
     }
 
     if ($FullFeature) {
+        # YOUTUBE MODE (full)
         $resolution = $script:Resolutions[$script:SelRes]
         $audio      = $script:AudioTracks[$script:SelAudio]
         $subtitle   = $script:SubtitleList[$script:SelSub]
@@ -1759,6 +1632,8 @@ function Show-DownloadScreen {
 
         return Invoke-Download -URL $URL -FormatString $fString -SubLang $subtitle.Lang -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
     } else {
+        # SIMPLE MODE (TikTok/IG/Twitter/Bstation)
+        # SelRes = format index (0=mp4, 1=mp3), SelAudio = resolution index
         $outputFmt = $script:FormatOptions[$script:SelRes].Value
         if ($outputFmt -eq 'mp3') {
             return Invoke-Download -URL $URL -FormatString 'bestaudio/best' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp3'
@@ -1769,10 +1644,11 @@ function Show-DownloadScreen {
             return Invoke-Download -URL $URL -FormatString $fString -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
         }
     }
+
 }
 
 # ============================================
-# SCREEN 4b: PLAYLIST
+# SCREEN 4b: PLAYLIST (checklist + progress + cancel)
 # ============================================
 
 function Show-PlaylistScreen {
@@ -1803,6 +1679,7 @@ function Show-PlaylistScreen {
     $statsRow = $h - 3
     $listMax  = [Math]::Max(2, $barRow - $listTop - 1)
 
+    # status: 0=pending 1=downloading 2=done 3=failed 4=skip(cancel)
     $status = @{}
     for ($i = 0; $i -lt $entries.Count; $i++) { $status[$i] = 0 }
     $script:PlWindowStart = 0
@@ -1834,10 +1711,10 @@ function Show-PlaylistScreen {
 
     function Draw-PlaylistWindow {
         param([int]$Current)
+        # geser window agar current terlihat
         $newStart = $script:PlWindowStart
         if ($Current -ge ($script:PlWindowStart + $listMax)) { $newStart = $Current - $listMax + 1 }
         elseif ($Current -lt $script:PlWindowStart) { $newStart = $Current }
-
         $script:PlWindowStart = $newStart
 
         for ($r = 0; $r -lt $listMax; $r++) {
@@ -1850,6 +1727,7 @@ function Show-PlaylistScreen {
     Draw-PlaylistWindow -Current 0
     Write-Center -Row $statsRow -Text "$FG_DIM enter  mulai download     esc  batal$RESET"
 
+    # konfirmasi
     while ($true) {
         $key = [Console]::ReadKey($true)
         if ($key.Key -eq 'Enter') { break }
@@ -1881,7 +1759,7 @@ function Show-PlaylistScreen {
         elseif ($res -eq 'cancel') { $status[$i] = 4; $stopAll = $true }
         else { $status[$i] = 3 }
 
-        Draw-PlaylistItem -Idx $i
+        Draw-PlaylistItem -Idx $i    # <- update centang SEBELUM lanjut
     }
 
     Write-Line -Row $barRow -Text ''
@@ -1953,15 +1831,21 @@ function Show-ErrorScreen {
 }
 
 # ============================================
-# DEPENDENCY CHECK
+# DEPENDENCY CHECK (AUTO INSTALL VIA WINGET)
 # ============================================
 
+# =====================================================
+# AUTO UPDATER
+# Check GitHub raw untuk versi terbaru, kalau ada -> tulis file baru
+# dan tampilkan layar update dengan countdown 3 detik lalu exit
+# =====================================================
 $script:UpdateUrl = 'https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/MediaDownloader.ps1'
 
 function Get-RemoteVersion {
     try {
+        # Ambil hanya baris awal (untuk deteksi $script:AppVersion) - lebih cepat
         $content = Invoke-WebRequest -Uri $script:UpdateUrl -UseBasicParsing -TimeoutSec 5
-        if ($content.Content -match '\$script:AppVersion\s*=\s*[''"](\d+\.\d+)[''"]') {
+        if ($content.Content -match '\$script:AppVersion\s*=\s*''([^'']+)''') {
             return $matches[1]
         }
     } catch {}
@@ -1990,9 +1874,10 @@ function Show-UpdateScreen {
     $m = Get-PanelMetrics -MaxWidth 72
 
     Write-Center -Row $centerRow -Text "$FG_CYAN$BOLD Update Tersedia $RESET" -VisibleLen 17
-    Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terinstall :$RESET  $FG_WHITE v$script:AppVersion$RESET" -Accent $FG_CYAN
+    Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terinstall :$RESET  $FG_WHITE v$($script:AppVersion)$RESET" -Accent $FG_CYAN
     Write-PanelLine -Row ($centerRow + 3) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terbaru    :$RESET  $FG_GREEN$BOLD v$NewVersion$RESET" -Accent $FG_CYAN
 
+    # Tulis file baru
     $installPath = Join-Path $env:USERPROFILE '.media-downloader\MediaDownloader.ps1'
     try {
         Set-Content -Path $installPath -Value $FullContent -Force -Encoding UTF8
@@ -2003,6 +1888,7 @@ function Show-UpdateScreen {
         return
     }
 
+    # Countdown 3 detik lalu exit
     for ($i = 3; $i -ge 1; $i--) {
         Write-Center -Row ($centerRow + 7) -Text "$FG_ORANGE Aplikasi akan tertutup dalam $i detik...$RESET  ${FG_DIM}buka kembali dengan: Media$RESET"
         Start-Sleep -Seconds 1
@@ -2017,26 +1903,32 @@ function Show-UpdateScreen {
 
 function Check-Update {
     param([bool]$Manual = $false)
+    # Non-blocking: jangan hang kalau internet lemot.
+    # Timeout singkat saat auto-check startup (2s) supaya app terasa cepat;
+    # manual check (ketik 'update') diberi waktu lebih (6s).
     $timeout = if ($Manual) { 6 } else { 2 }
     try {
         $resp = Invoke-WebRequest -Uri $script:UpdateUrl -UseBasicParsing -TimeoutSec $timeout
-        if ($resp.Content -match '\$script:AppVersion\s*=\s*[''"](\d+\.\d+)[''"]') {
+        if ($resp.Content -match '\$script:AppVersion\s*=\s*''([^'']+)''') {
             $remoteVer = $matches[1]
             if (Is-NewerVersion -Remote $remoteVer -Local $script:AppVersion) {
                 Show-UpdateScreen -NewVersion $remoteVer -FullContent $resp.Content
                 return $true
             }
             elseif ($Manual) {
-                return 'uptodate'
+                return 'uptodate'   # untuk feedback "sudah versi terbaru"
             }
         }
     } catch {
         if ($Manual) { return 'error' }
+        # Diam saja kalau gagal cek (offline / GitHub down)
     }
     return $false
 }
 
 function Test-Dependencies {
+    # Cek apakah yt-dlp sudah ada. Jika belum, install otomatis via winget.
+    # (Package yt-dlp di winget sudah include/depend on ffmpeg, jadi tidak perlu install terpisah)
     if (Get-Command yt-dlp -ErrorAction SilentlyContinue) { return $true }
 
     Clear-Screen
@@ -2047,16 +1939,21 @@ function Test-Dependencies {
     Write-Center -Row ($centerRow - 2) -Text "$FG_CYAN${BOLD}Menyiapkan Media Downloader...$RESET"
     Write-Center -Row $centerRow -Text "$FG_GRAY Menginstall yt-dlp + ffmpeg via winget...$RESET"
 
-    $proc = Start-Process -FilePath "winget" -ArgumentList "install yt-dlp --silent --accept-package-agreements --accept-source-agreements" -NoNewWindow -PassThru
+    # Jalankan winget dengan WindowStyle Hidden agar output teks tidak mengacak-acak layar
+    $proc = Start-Process -FilePath "winget" `
+        -ArgumentList "install yt-dlp --silent --accept-package-agreements --accept-source-agreements" `
+        -WindowStyle Hidden -PassThru
 
     $i = 0
     while (-not $proc.HasExited) {
         $spin = $script:SpinChars[$i % 10]
-        Write-Center -Row ($centerRow + 2) -Text "$FG_CYAN$spin$RESET  ${FG_WHITE}Mohon tunggu sebentar...$RESET"
+        # Clear row before writing spinner to prevent overlap
+        Write-Line -Row ($centerRow + 2) -Text "$FG_CYAN$spin$RESET  ${FG_WHITE}Mohon tunggu sebentar...$RESET"
         Start-Sleep -Milliseconds 150
         $i++
     }
 
+    # Refresh PATH environment variable agar yt-dlp langsung terbaca tanpa restart
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
     if (Get-Command yt-dlp -ErrorAction SilentlyContinue) {
@@ -2080,6 +1977,7 @@ try {
     Load-Blocklist
     if (-not (Test-Dependencies)) { exit }
 
+    # Auto-update check (hanya kalau diaktifkan di Settings; default On)
     if ($script:Settings.AutoUpdate) {
         [void](Check-Update)
     }
@@ -2088,8 +1986,9 @@ try {
     while ($running) {
         $url = Show-WelcomeScreen
         if ($null -eq $url) { $running = $false; break }
-        if ($url -eq 'RELOAD') { continue }
+        if ($url -eq 'RELOAD') { continue }   # habis dari settings
 
+        # === Cek blocklist ===
         $detectedPlatform = Detect-Platform -Url $url
         if (Is-PlatformBlocked -Platform $detectedPlatform) {
             $reason = Get-BlockReason -Platform $detectedPlatform
@@ -2098,6 +1997,7 @@ try {
             continue
         }
 
+        # === IMAGE DIRECT DOWNLOAD ===
         if (Is-ImageUrl -Url $url) {
             $imgResult = Invoke-ImageDownload -URL $url
             $errMsg = if ($imgResult -eq 'fail') { 'Gagal download gambar. Cek URL.' } else { '' }
@@ -2106,6 +2006,7 @@ try {
             continue
         }
 
+        # Fetch flat (deteksi playlist), bisa di-cancel
         $info = Invoke-FetchJson -URL $url -Message 'Mengambil informasi...' -Flat $true
         if (-not $info) {
             $errText = if ($script:LastError) { $script:LastError } else { '' }
@@ -2124,11 +2025,13 @@ try {
         $isPlaylist = ($info._type -eq 'playlist') -and ($info.entries) -and (@($info.entries).Count -gt 1)
 
         if ($isPlaylist) {
+            # Kalau playlist YT Music, paksa semua jadi MP3
             $isPlaylistAudio = ($url -match 'music\.youtube\.com')
             Show-PlaylistScreen -Info $info -ForceAudio $isPlaylistAudio
-            continue
+            continue   # kembali ke welcome
         }
 
+        # single video: pastikan full info
         if (-not $info.formats) {
             $target = if ($info.entries) { @($info.entries)[0] } else { $info }
             $vurl = $url
@@ -2154,19 +2057,27 @@ try {
             continue
         }
 
+        # Deteksi apakah platform mendukung full feature (audio track & subtitle)
         $fullFeature = Is-FullFeaturePlatform -Url $url
 
+        # === YOUTUBE MUSIC: auto MP3, skip format screen ===
+        # YouTube Music isinya audio-only + sudah punya thumbnail album art.
+        # Langsung download MP3 dengan cover + metadata, tanpa tanya resolusi/audio track.
         $isYTMusic = Is-YouTubeMusicUrl -Url $url
         if ($isYTMusic) {
+            # Paksa format ke mp3 untuk sesi ini (tanpa mengubah setting user)
             $savedFormat = $script:Settings.Format
             $script:Settings.Format = 'mp3'
 
+            # Playlist YT Music? Pakai playlist screen dengan force-mp3
             if ($isPlaylist) {
+                # Show-PlaylistScreen pakai flag force-mp3
                 [void](Show-PlaylistScreen -Info $info -ForceAudio $true)
                 $script:Settings.Format = $savedFormat
                 continue
             }
 
+            # Single track: skip format screen, langsung download mp3
             $result = Show-DownloadScreen -URL $url -FullFeature $false -ForceAudio $true
 
             $errMsg = ""
@@ -2190,9 +2101,11 @@ try {
 
         $result = Show-DownloadScreen -URL $url -FullFeature $fullFeature
 
+        # Update blocklist tracking
         if ($result -eq 'ok') {
             Record-PlatformSuccess -Platform $detectedPlatform
 
+            # Autoplay (kalau diaktifkan di Settings) - cari file hasil download barusan
             $latestFile = Get-LatestDownloadedFile -Dir $script:SaveDir
             if ($latestFile) {
                 Invoke-AutoplayMedia -FilePath $latestFile.FullName
@@ -2218,6 +2131,6 @@ try {
 finally {
     try { [Console]::CursorVisible = $true } catch {}
     Clear-Screen
-    Write-Host "$FG_GRAY Terima kasih telah menggunakan Media Downloader v$script:AppVersion$RESET"
+    Write-Host "$FG_GRAY Terima kasih telah menggunakan Media Downloader v1.0$RESET"
     Write-Host ""
 }
