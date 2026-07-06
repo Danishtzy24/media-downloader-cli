@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Media Downloader — PowerShell CLI Universal</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #09090b;
+      --card: #141416;
+      --border: #222225;
+      --fg: #f4f4f5;
+      --dim: #71717a;
+      --blue-accent: #6496ff;
+    }
+    body {
+      background-color: var(--bg);
+      font-family: 'Inter', sans-serif;
+      color: var(--fg);
+      overflow-x: hidden;
+    }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+    .cursor-blink {
+      display: inline-block; width: 8px; height: 17px;
+      background-color: var(--fg);
+      animation: blink 1s steps(1) infinite;
+      vertical-align: middle;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .grid-bg {
+      background-size: 40px 40px;
+      background-image: linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+    }
+    @keyframes slideIn { from { transform: translateY(1rem); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .animate-toast { animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    .feature-card {
+      transition: all 0.2s ease;
+      border: 1px solid rgba(34, 34, 37, 0.6);
+    }
+    .feature-card:hover {
+      border-color: rgba(34, 34, 37, 1);
+      background: rgba(20, 20, 22, 0.6);
+      transform: translateY(-2px);
+    }
+  </style>
+</head>
+<body class="relative min-h-screen flex flex-col justify-between grid-bg selection:bg-neutral-800">
+
+  <!-- Glow Effect -->
+  <div class="absolute top-[-20%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-neutral-900/40 rounded-full blur-[140px] pointer-events-none"></div>
+
+  <!-- Header -->
+  <header class="w-full max-w-6xl mx-auto px-6 py-8 flex justify-between items-center z-10">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg border border-neutral-800 bg-neutral-900 flex items-center justify-center font-mono font-bold text-sm tracking-tighter select-none">M_</div>
+      <div>
+        <span class="font-mono font-bold tracking-tight text-white block">MEDIA</span>
+        <span class="text-[10px] text-neutral-500 font-mono -mt-1 block">DOWNLOADER CLI</span>
+      </div>
+    </div>
+    <nav class="hidden md:flex items-center gap-6 text-sm">
+      <a href="#install" class="text-neutral-400 hover:text-white transition-colors">Install</a>
+      <a href="#features" class="text-neutral-400 hover:text-white transition-colors">Fitur</a>
+      <a href="#platforms" class="text-neutral-400 hover:text-white transition-colors">Platform</a>
+      <a href="https://github.com/Danishtzy24/media-downloader-cli" target="_blank" class="text-neutral-400 hover:text-white transition-colors flex items-center gap-1.5">
+        GitHub
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+      </a>
+    </nav>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="flex-1 w-full max-w-6xl mx-auto px-6 py-12 md:py-16 flex flex-col lg:flex-row items-center gap-12 z-10">
+    
+    <!-- Left: Copywriting -->
+    <div class="w-full lg:w-1/2 flex flex-col justify-center">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-neutral-800 bg-neutral-950/60 w-fit mb-6">
+        <span class="flex h-2 w-2 relative">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        <span class="text-[11px] font-mono text-neutral-400">v1.0 — Long Time Support</span>
+      </div>
+
+      <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none">
+        Download Media dari <span class="text-transparent bg-clip-text bg-gradient-to-r from-neutral-200 via-neutral-400 to-neutral-600">6+ Platform</span> dalam Satu Terminal
+      </h1>
+
+      <p class="mt-6 text-neutral-400 text-sm md:text-base leading-relaxed max-w-lg">
+        Media Downloader adalah CLI berbasis PowerShell yang mendukung YouTube, TikTok, Twitter/X, Instagram, Bstation, dan gambar langsung. Dilengkapi fitur premium: auto-cover art MP3, dubbing multi-bahasa, playlist bulk download, dan auto-play terintegrasi Windows Settings.
+      </p>
+
+      <!-- Install Box -->
+      <div class="mt-10" id="install">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-xs font-mono text-neutral-500 uppercase tracking-wider">Instalasi Cepat</span>
+          <span class="h-[1px] flex-1 bg-neutral-900"></span>
+        </div>
+        
+        <div class="relative group">
+          <div class="w-full bg-[#101012] border border-neutral-800 rounded-xl p-4 flex items-center justify-between font-mono text-xs md:text-sm shadow-md transition-all group-hover:border-neutral-700">
+            <span class="text-neutral-300 overflow-x-auto whitespace-nowrap scrollbar-none pr-6 flex items-center select-all">
+              <span class="text-neutral-600 mr-2 select-none">&gt;</span>
+              <span id="install-link" class="text-neutral-200">irm https://mu-cli.vercel.app | iex</span>
+            </span>
+            <button id="copy-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-800 bg-neutral-950 hover:bg-white hover:text-black hover:border-white transition-all text-xs font-semibold tracking-wide cursor-pointer text-neutral-400">
+              <svg id="copy-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+              <svg id="check-icon" class="w-3.5 h-3.5 hidden text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <span id="copy-text">Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-3 text-xs font-mono text-neutral-500">
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
+            <code class="text-neutral-300">Media</code> → Jalankan
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
+            <code class="text-neutral-300">Remove-Media</code> → Hapus
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
+            <code class="text-neutral-300">update</code> → Cek update
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
+            <code class="text-neutral-300">reset</code> → Buka blokir
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Terminal Mockup -->
+    <div class="w-full lg:w-1/2 flex items-center justify-center">
+      <div class="w-full max-w-[560px] aspect-[4/3] rounded-xl border border-neutral-800 bg-[#0c0c0d] overflow-hidden shadow-2xl flex flex-col" style="box-shadow: 0 30px 80px rgba(0,0,0,0.8);">
+        <div class="bg-[#141416] px-4 py-3 border-b border-neutral-900 flex items-center justify-between select-none">
+          <div class="flex gap-2">
+            <span class="w-3 h-3 rounded-full bg-[#ff5f56]"></span>
+            <span class="w-3 h-3 rounded-full bg-[#ffbd2e]"></span>
+            <span class="w-3 h-3 rounded-full bg-[#27c93f]"></span>
+          </div>
+          <span class="font-mono text-[11px] text-neutral-500">Windows PowerShell — Media v1.0</span>
+          <div class="w-10"></div>
+        </div>
+
+        <div id="terminal-content" class="flex-1 p-6 font-mono text-xs md:text-sm flex flex-col justify-between overflow-y-auto selection:bg-neutral-800 leading-relaxed text-neutral-300">
+          
+          <!-- SCREEN 1: WELCOME -->
+          <div id="term-screen-1" class="h-full flex flex-col justify-between">
+            <div class="space-y-4">
+              <pre class="text-[9px] md:text-[11px] leading-[1.1] font-bold text-white tracking-wider select-none text-center">
+███╗   ███╗███████╗██████╗ ██╗ █████╗ 
+████╗ ████║██╔════╝██╔══██╗██║██╔══██╗
+██╔████╔██║█████╗  ██║  ██║██║███████║
+██║╚██╔╝██║██╔══╝  ██║  ██║██║██╔══██║
+██║ ╚═╝ ██║███████╗██████╔╝██║██║  ██║
+╚═╝     ╚═╝╚══════╝╚═════╝ ╚═╝╚═╝  ╚═╝</pre>
+              <div class="text-center text-[10px] text-neutral-500 tracking-wider -mt-2 uppercase">Media Downloader v1.0</div>
+
+              <div class="mt-6 border border-neutral-800 bg-[#121214] rounded-lg p-3 space-y-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-neutral-500 font-bold">←</span>
+                  <span class="text-white font-bold" id="term-platform">YouTube</span>
+                  <span class="text-neutral-500 font-bold">→</span>
+                </div>
+                <div class="border-l-2 border-[#6496ff] pl-3 py-1 text-xs">
+                  <span class="text-neutral-500 select-none">URL: </span>
+                  <span id="term-input-text" class="text-neutral-300 font-mono"></span><span class="cursor-blink"></span>
+                </div>
+                <div class="border-l-2 border-neutral-800 pl-3 py-1 text-[11px] text-neutral-500">
+                  Folder: C:\Users\danis\Downloads
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex justify-center gap-4 text-[10px] text-neutral-500 select-none">
+                <span>←→ platform</span>
+                <span>tab folder</span>
+                <span>f2 settings</span>
+              </div>
+              <div class="text-center text-[11px] text-neutral-400">
+                <span class="text-orange-400">•</span> Format: MP4  ·  Dubbing: Original  ·  Resolusi: Terbaik
+              </div>
+            </div>
+          </div>
+
+          <!-- SCREEN 2: FETCHING -->
+          <div id="term-screen-2" class="hidden h-full flex flex-col justify-center items-center gap-3">
+            <span class="text-[#78dcdc] text-2xl animate-spin">⠋</span>
+            <span class="text-white font-medium">Mengambil informasi video...</span>
+            <span class="text-neutral-500 text-xs truncate max-w-[280px]" id="term-fetch-link"></span>
+          </div>
+
+          <!-- SCREEN 3: FORMAT -->
+          <div id="term-screen-3" class="hidden h-full flex flex-col justify-between">
+            <div class="space-y-4">
+              <div class="border-l-2 border-[#6496ff] pl-3 py-1 bg-[#121214] rounded-r-lg">
+                <div class="text-white font-bold truncate" id="term-video-title">Judul Video</div>
+                <div class="text-neutral-500 text-xs">3:33  ·  Channel Name</div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-xs">
+                <div class="space-y-2">
+                  <div class="text-[#6496ff] font-bold">Resolusi</div>
+                  <div class="space-y-1 text-neutral-400">
+                    <div><span class="text-[#6496ff]">▸</span> <span class="text-white">1080p FHD</span></div>
+                    <div class="pl-3">720p HD</div>
+                    <div class="pl-3">480p</div>
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  <div class="text-neutral-500">Audio</div>
+                  <div class="space-y-1 text-neutral-400">
+                    <div class="pl-3 text-neutral-500">Original</div>
+                    <div class="pl-3 text-neutral-500">Indonesia</div>
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  <div class="text-neutral-500">Subtitle</div>
+                  <div class="space-y-1 text-neutral-400">
+                    <div class="pl-3 text-neutral-500">Tidak</div>
+                    <div class="pl-3 text-neutral-500">Indonesia</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="text-center text-[10px] text-neutral-500 select-none">
+              ↑↓ pilih  ·  ←→/tab kolom  ·  enter download  ·  esc batal
+            </div>
+          </div>
+
+          <!-- SCREEN 4: DOWNLOAD -->
+          <div id="term-screen-4" class="hidden h-full flex flex-col justify-center gap-6">
+            <div class="border-l-2 border-[#6496ff] pl-3 py-1 bg-[#121214] rounded-r-lg">
+              <div class="text-white font-bold truncate" id="term-dl-title">Judul Video</div>
+              <div class="text-[#78dcdc] text-[11px] font-bold mt-1">Downloading...</div>
+            </div>
+
+            <div>
+              <div class="flex justify-between items-center text-xs mb-1">
+                <span class="text-neutral-400" id="term-dl-speed">4.50 MiB/s</span>
+                <span class="text-white font-bold" id="term-dl-pct">0%</span>
+              </div>
+              <div class="w-full bg-[#1c1c1f] rounded-full h-2 overflow-hidden flex">
+                <div id="term-dl-bar" class="bg-[#6496ff] h-full transition-all duration-150" style="width: 0%"></div>
+              </div>
+              <div class="flex justify-between items-center text-[10px] text-neutral-500 mt-1">
+                <span id="term-dl-eta">ETA 00:15</span>
+                <span id="term-dl-size">0.0 MiB / 87.4 MiB</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- SCREEN 5: DONE -->
+          <div id="term-screen-5" class="hidden h-full flex flex-col justify-center items-center gap-4 text-center">
+            <span class="text-emerald-400 text-3xl">✓</span>
+            <div class="space-y-1">
+              <div class="text-white font-bold text-sm">Download Selesai!</div>
+              <div class="text-neutral-500 text-xs">File tersimpan di folder tujuan.</div>
+            </div>
+            <button id="term-reset-btn" class="mt-2 px-3 py-1.5 rounded-lg border border-neutral-800 hover:border-neutral-700 bg-neutral-950 font-mono text-xs cursor-pointer text-neutral-400 hover:text-white transition-all">
+              Mulai Lagi (Enter)
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ALL FEATURES SECTION -->
+  <section class="w-full max-w-6xl mx-auto px-6 py-12 md:py-20 border-t border-neutral-900/60 mt-12" id="features">
+    <div class="text-center mb-12">
+      <h2 class="text-2xl md:text-3xl font-bold text-white">Fitur Lengkap</h2>
+      <p class="text-neutral-400 text-sm mt-2 max-w-2xl mx-auto">Semua yang kamu butuhkan untuk download media dari internet, dalam satu tool terminal yang powerful.</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      
+      <!-- Feature 1: Multi Platform -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">01</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">6+ Platform Support</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">YouTube (termasuk Music & Playlist), TikTok, Twitter/X, Instagram (Reels/Post), Bstation, dan gambar langsung dari URL.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 2: MP3 Cover Art -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">02</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">MP3 dengan Cover Art</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Download audio saja dengan thumbnail album art otomatis ter-embed (crop persegi 1:1) + metadata lengkap (artist, album, title).</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 3: Multi Audio Track -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">03</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Dubbing Multi-Bahasa</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Deteksi otomatis trek audio dubbing (Indonesia, English, Japanese, dll) untuk video YouTube yang mendukung multi-audio.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 4: Playlist Bulk -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">04</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Playlist Bulk Download</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Download seluruh playlist dengan checklist progress per video. Support YouTube Music playlist (auto MP3 semua track).</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 5: Auto Cookies -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">05</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Auto Browser Cookies</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Akses video private, members-only, atau login-required dengan cookie otomatis dari Chrome/Edge/Firefox/Brave.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 6: AVC/H.264 Output -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">06</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Output AVC/H.264</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Selalu menghasilkan MP4 dengan codec video H.264 (AVC) + audio AAC untuk kompatibilitas maksimal di semua device.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 7: Windows Autoplay -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">07</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Windows Autoplay</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Otomatis memutar file hasil download dengan media player default dari Windows Settings (VLC, WMP, PotPlayer, dll).</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 8: Smart Blocklist -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">08</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Smart Blocklist</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Auto-blokir platform yang error server berulang (2x). Bedakan error auth/cookies (tidak diblok) vs error provider (diblok).</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 9: Auto Update -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">09</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Auto Update</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Cek versi terbaru dari GitHub tiap start. Kalau ada update, langsung download & restart otomatis dengan countdown 3 detik.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 10: Zero Flicker UI -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">10</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Zero Flicker UI</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Rendering statis dengan single-write ANSI escape codes. Transisi halus tanpa kedip, bahkan saat progress download real-time.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 11: Image Download -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">11</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Direct Image Download</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Paste URL gambar (.jpg, .png, .webp, .gif) langsung download tanpa yt-dlp. Otomatis simpan dengan timestamp.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 12: Settings Persistent -->
+      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">12</div>
+          <div>
+            <h3 class="text-white font-bold text-sm">Settings Persistent</h3>
+            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Simpan preferensi format (MP4/MP3), resolusi max, dubbing language, cookies, autoplay, auto-update di JSON lokal.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- PLATFORMS SECTION -->
+  <section class="w-full max-w-6xl mx-auto px-6 py-12 md:py-20 border-t border-neutral-900/60" id="platforms">
+    <div class="text-center mb-10">
+      <h2 class="text-2xl md:text-3xl font-bold text-white">Platform yang Didukung</h2>
+      <p class="text-neutral-400 text-sm mt-2">Semua platform populer dengan fitur spesifik masing-masing.</p>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
+        <div class="text-white font-bold text-sm">YouTube</div>
+        <div class="text-[10px] text-neutral-500 mt-1">Video, Music, Playlist, Shorts</div>
+      </div>
+      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
+        <div class="text-white font-bold text-sm">TikTok</div>
+        <div class="text-[10px] text-neutral-500 mt-1">Video progressive</div>
+      </div>
+      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
+        <div class="text-white font-bold text-sm">Twitter / X</div>
+        <div class="text-[10px] text-neutral-500 mt-1">Video timeline</div>
+      </div>
+      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
+        <div class="text-white font-bold text-sm">Instagram</div>
+        <div class="text-[10px] text-neutral-500 mt-1">Reels, Posts</div>
+      </div>
+      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
+        <div class="text-white font-bold text-sm">Bstation</div>
+        <div class="text-[10px] text-neutral-500 mt-1">Bilibili video</div>
+      </div>
+      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
+        <div class="text-white font-bold text-sm">Generic</div>
+        <div class="text-[10px] text-neutral-500 mt-1">1000+ situs via yt-dlp</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMMANDS CHEATSHEET -->
+  <section class="w-full max-w-6xl mx-auto px-6 py-12 md:py-20 border-t border-neutral-900/60">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div>
+        <h3 class="text-white font-bold text-lg mb-4">Perintah Terminal</h3>
+        <div class="space-y-2 font-mono text-xs">
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">Media</code>
+            <span class="text-neutral-500">Jalankan aplikasi</span>
+          </div>
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">Remove-Media</code>
+            <span class="text-neutral-500">Uninstall lengkap</span>
+          </div>
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">update</code>
+            <span class="text-neutral-500">Cek update manual</span>
+          </div>
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">reset</code>
+            <span class="text-neutral-500">Buka blokir platform</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="text-white font-bold text-lg mb-4">Keyboard Shortcuts</h3>
+        <div class="space-y-2 font-mono text-xs">
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">← →</code>
+            <span class="text-neutral-500">Ganti platform</span>
+          </div>
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">Tab</code>
+            <span class="text-neutral-500">Pindah field (URL/Folder)</span>
+          </div>
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">F2</code>
+            <span class="text-neutral-500">Buka Settings</span>
+          </div>
+          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
+            <code class="text-neutral-300">Ctrl+V</code>
+            <span class="text-neutral-500">Paste dari clipboard</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="w-full max-w-6xl mx-auto px-6 py-8 border-t border-neutral-900 flex flex-col md:flex-row justify-between items-center text-xs text-neutral-500 gap-4 z-10">
+    <div>© 2026 Danishtzy24. Media Downloader CLI is licensed under MIT.</div>
+    <div class="flex gap-6 font-mono text-[10px]">
+      <span>yt-dlp powered</span>
+      <span>ffmpeg merged</span>
+      <span>spotdl ready</span>
+    </div>
+  </footer>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 bg-[#161618] border border-neutral-800 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2.5 text-xs text-neutral-200 hidden select-none">
+    <span class="text-emerald-500 font-bold">✓</span>
+    <span id="toast-msg">Salin berhasil</span>
+  </div>
+
+  <script>
+    // Config
+    const REPO_LINK = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1";
+    document.getElementById('install-link').textContent = REPO_LINK;
+
+    // Copy Handler
+    const copyBtn = document.getElementById('copy-btn');
+    const copyIcon = document.getElementById('copy-icon');
+    const checkIcon = document.getElementById('check-icon');
+    const copyText = document.getElementById('copy-text');
+    const toast = document.getElementById('toast');
+    const toastMsg = document.getElementById('toast-msg');
+
+    copyBtn.addEventListener('click', async () => {
+      const fullCmd = `irm ${REPO_LINK} | iex`;
+      try {
+        await navigator.clipboard.writeText(fullCmd);
+        copyBtn.classList.add('border-emerald-500/30', 'bg-emerald-950/20');
+        copyIcon.classList.add('hidden');
+        checkIcon.classList.remove('hidden');
+        copyText.textContent = "Copied";
+        copyText.classList.add('text-emerald-400');
+        showToast("Perintah instalasi disalin!");
+        setTimeout(() => {
+          copyBtn.classList.remove('border-emerald-500/30', 'bg-emerald-950/20');
+          copyIcon.classList.remove('hidden');
+          checkIcon.classList.add('hidden');
+          copyText.textContent = "Copy";
+          copyText.classList.remove('text-emerald-400');
+        }, 2000);
+      } catch (err) {
+        showToast("Gagal menyalin, silakan salin manual.");
+      }
+    });
+
+    function showToast(msg) {
+      toastMsg.textContent = msg;
+      toast.classList.remove('hidden');
+      toast.classList.add('animate-toast');
+      setTimeout(() => {
+        toast.classList.add('hidden');
+        toast.classList.remove('animate-toast');
+      }, 3000);
+    }
+
+    // Terminal Simulation
+    const platforms = ["YouTube", "TikTok", "Twitter", "Instagram", "Bstation"];
+    const hints = [
+      "https://youtu.be/fDTEAeYEJ5s?si=gmX7VjWoahJMe-SV",
+      "https://www.tiktok.com/@mrbeast/video/7319382103",
+      "https://x.com/SpaceX/status/1749102830",
+      "https://www.instagram.com/reel/C2F98hAL_yv/",
+      "https://www.bilibili.tv/id/video/4789102"
+    ];
+    const titles = [
+      "3 Levels of Car Theft - Mark Rober",
+      "I Survived 100 Days In Nuclear Bunker",
+      "Starship Flight 3 Launch Highlights",
+      "Insane Drone Shot of Dolomites Alps",
+      "Bocchi The Rock! - Official Series"
+    ];
+
+    let currentStep = 1, loopIndex = 0, typingTimer = null, progressTimer = null;
+    const screens = [null, document.getElementById('term-screen-1'), document.getElementById('term-screen-2'), document.getElementById('term-screen-3'), document.getElementById('term-screen-4'), document.getElementById('term-screen-5')];
+    const els = {
+      platform: document.getElementById('term-platform'),
+      input: document.getElementById('term-input-text'),
+      fetchLink: document.getElementById('term-fetch-link'),
+      videoTitle: document.getElementById('term-video-title'),
+      dlTitle: document.getElementById('term-dl-title'),
+      dlPct: document.getElementById('term-dl-pct'),
+      dlBar: document.getElementById('term-dl-bar'),
+      dlSpeed: document.getElementById('term-dl-speed'),
+      dlEta: document.getElementById('term-dl-eta'),
+      dlSize: document.getElementById('term-dl-size'),
+      resetBtn: document.getElementById('term-reset-btn')
+    };
+
+    function switchScreen(n) {
+      screens.forEach((s, i) => { if (i > 0) s.classList.add('hidden'); });
+      if (screens[n]) screens[n].classList.remove('hidden');
+    }
+
+    function runSimulation() {
+      clearTimeout(typingTimer);
+      clearInterval(progressTimer);
+      const plat = platforms[loopIndex], link = hints[loopIndex], title = titles[loopIndex];
+      switchScreen(1);
+      els.platform.textContent = plat;
+      els.input.textContent = "";
+
+      let charIndex = 0;
+      function typeChar() {
+        if (charIndex < link.length) {
+          els.input.textContent += link[charIndex++];
+          typingTimer = setTimeout(typeChar, 40);
+        } else {
+          typingTimer = setTimeout(() => {
+            switchScreen(2);
+            els.fetchLink.textContent = link;
+            typingTimer = setTimeout(() => {
+              switchScreen(3);
+              els.videoTitle.textContent = title;
+              typingTimer = setTimeout(() => {
+                switchScreen(4);
+                els.dlTitle.textContent = title;
+                let pct = 0;
+                els.dlPct.textContent = "0%";
+                els.dlBar.style.width = "0%";
+                els.dlSpeed.textContent = "7.80 MiB/s";
+                els.dlEta.textContent = "ETA 00:11";
+                els.dlSize.textContent = "0.0 MiB / 87.4 MiB";
+                progressTimer = setInterval(() => {
+                  pct += Math.floor(Math.random() * 12) + 4;
+                  if (pct >= 100) {
+                    pct = 100;
+                    clearInterval(progressTimer);
+                    els.dlPct.textContent = "100%";
+                    els.dlBar.style.width = "100%";
+                    els.dlSpeed.textContent = "Merge audio+video...";
+                    els.dlEta.textContent = "ETA 00:00";
+                    els.dlSize.textContent = "87.4 MiB / 87.4 MiB";
+                    typingTimer = setTimeout(() => {
+                      switchScreen(5);
+                      typingTimer = setTimeout(() => {
+                        loopIndex = (loopIndex + 1) % platforms.length;
+                        runSimulation();
+                      }, 4000);
+                    }, 1500);
+                  } else {
+                    els.dlPct.textContent = pct + "%";
+                    els.dlBar.style.width = pct + "%";
+                    els.dlSize.textContent = ((87.4 * pct) / 100).toFixed(1) + " MiB / 87.4 MiB";
+                  }
+                }, 180);
+              }, 2500);
+            }, 2000);
+          }, 1000);
+        }
+      }
+      typingTimer = setTimeout(typeChar, 800);
+    }
+
+    els.resetBtn.addEventListener('click', () => {
+      loopIndex = (loopIndex + 1) % platforms.length;
+      runSimulation();
+    });
+
+    window.addEventListener('DOMContentLoaded', () => { runSimulation(); });
+  </script>
+</body>
+</html>
