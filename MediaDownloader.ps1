@@ -1,3 +1,17 @@
+<#
+.SYNOPSIS
+    Media Downloader v1.0 - Terminal UI
+.DESCRIPTION
+    Downloader universal untuk YouTube / TikTok / Twitter / Instagram / Bstation / Gambar.
+    - UI statis anti-kedip
+    - Progress bar real-time
+    - Playlist checklist
+    - MP4 / MP3 / Image
+    - Auto-update dari GitHub
+    - Auto-cookies dari browser
+    - Smart blocklist (bedakan error server vs private/cookies)
+#>
+
 $script:AppVersion = '1.0'
 
 $ErrorActionPreference = 'Stop'
@@ -146,7 +160,14 @@ function Detect-Platform {
 
 function Is-FullFeaturePlatform {
     param([string]$Url)
-    return ($Url -match 'youtube\.com|youtu\.be')
+    return ($Url -match 'youtube\.com|youtu\.be') -and ($Url -notmatch 'music\.youtube\.com')
+}
+
+# YouTube Music = audio only (sudah bawaan thumbnail album art)
+# Otomatis langsung MP3 tanpa tanya user.
+function Is-YouTubeMusicUrl {
+    param([string]$Url)
+    return ($Url -match 'music\.youtube\.com')
 }
 
 # =====================================================
@@ -1575,7 +1596,7 @@ $script:FormatOptions = @(
 # ============================================
 
 function Show-DownloadScreen {
-    param([string]$URL, [bool]$FullFeature = $true)
+    param([string]$URL, [bool]$FullFeature = $true, [bool]$ForceAudio = $false)
     Clear-Screen
     Draw-Footer
 
@@ -1586,8 +1607,17 @@ function Show-DownloadScreen {
     $m = Get-PanelMetrics -MaxWidth 76
     $titleText = Limit-Text -Text $title -Max ($m.Inner - 1)
 
-    Write-PanelLine -Row ($centerRow - 4) -Col $m.Col -Width $m.Width -Text "${FG_CYAN}Downloading...$RESET"
+    if ($ForceAudio) {
+        Write-PanelLine -Row ($centerRow - 4) -Col $m.Col -Width $m.Width -Text "${FG_GREEN}$GL_BULLET YouTube Music - Downloading audio$RESET"
+    } else {
+        Write-PanelLine -Row ($centerRow - 4) -Col $m.Col -Width $m.Width -Text "${FG_CYAN}Downloading...$RESET"
+    }
     Write-PanelLine -Row ($centerRow - 3) -Col $m.Col -Width $m.Width -Text "$FG_WHITE$titleText$RESET"
+
+    # === YOUTUBE MUSIC: force MP3 dengan cover art + metadata ===
+    if ($ForceAudio) {
+        return Invoke-Download -URL $URL -FormatString 'bestaudio/best' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp3'
+    }
 
     if ($FullFeature) {
         # YOUTUBE MODE (full)
@@ -1621,7 +1651,7 @@ function Show-DownloadScreen {
 # ============================================
 
 function Show-PlaylistScreen {
-    param($Info)
+    param($Info, [bool]$ForceAudio = $false)
 
     $entries = @($Info.entries | Where-Object { $_ })
     if ($entries.Count -eq 0) { return }
@@ -1635,8 +1665,13 @@ function Show-PlaylistScreen {
     $m = Get-PanelMetrics -MaxWidth 76
     $topRow = 1
 
-    Write-PanelLine -Row $topRow -Col $m.Col -Width $m.Width -Text "$FG_WHITE$BOLD$(Limit-Text -Text $plTitle -Max ($m.Inner - 1))$RESET"
-    Write-PanelLine -Row ($topRow + 1) -Col $m.Col -Width $m.Width -Text "$FG_GRAY$($entries.Count) video  $GL_DOT  $(Get-ResLabel $script:Settings.MaxRes)  $GL_DOT  $(Get-AudioLangLabel $script:Settings.AudioLang)$RESET"
+    $playlistTag = if ($ForceAudio) { " (YT Music)" } else { "" }
+    Write-PanelLine -Row $topRow -Col $m.Col -Width $m.Width -Text "$FG_WHITE$BOLD$(Limit-Text -Text $plTitle -Max ($m.Inner - 1 - $playlistTag.Length))$playlistTag$RESET"
+    if ($ForceAudio) {
+        Write-PanelLine -Row ($topRow + 1) -Col $m.Col -Width $m.Width -Text "$FG_GREEN$GL_BULLET$RESET $FG_GRAY$($entries.Count) track audio  $GL_DOT  MP3 + cover$RESET"
+    } else {
+        Write-PanelLine -Row ($topRow + 1) -Col $m.Col -Width $m.Width -Text "$FG_GRAY$($entries.Count) video  $GL_DOT  $(Get-ResLabel $script:Settings.MaxRes)  $GL_DOT  $(Get-AudioLangLabel $script:Settings.AudioLang)$RESET"
+    }
 
     $listTop  = $topRow + 3
     $barRow   = $h - 4
@@ -1699,7 +1734,7 @@ function Show-PlaylistScreen {
     }
 
     $fString = Build-AutoFormat
-    $outFmt = $script:Settings.Format
+    $outFmt = if ($ForceAudio) { 'mp3' } else { $script:Settings.Format }
     $okCount = 0
     $stopAll = $false
 
@@ -2000,6 +2035,42 @@ try {
 
         # Deteksi apakah platform mendukung full feature (audio track & subtitle)
         $fullFeature = Is-FullFeaturePlatform -Url $url
+
+        # === YOUTUBE MUSIC: auto MP3, skip format screen ===
+        # YouTube Music isinya audio-only + sudah punya thumbnail album art.
+        # Langsung download MP3 dengan cover + metadata, tanpa tanya resolusi/audio track.
+        $isYTMusic = Is-YouTubeMusicUrl -Url $url
+        if ($isYTMusic) {
+            # Paksa format ke mp3 untuk sesi ini (tanpa mengubah setting user)
+            $savedFormat = $script:Settings.Format
+            $script:Settings.Format = 'mp3'
+
+            # Playlist YT Music? Pakai playlist screen dengan force-mp3
+            if ($isPlaylist) {
+                # Show-PlaylistScreen pakai flag force-mp3
+                [void](Show-PlaylistScreen -Info $info -ForceAudio $true)
+                $script:Settings.Format = $savedFormat
+                continue
+            }
+
+            # Single track: skip format screen, langsung download mp3
+            $result = Show-DownloadScreen -URL $url -FullFeature $false -ForceAudio $true
+
+            $errMsg = ""
+            if ($result -eq 'fail' -and $script:LastError) {
+                $errRaw = (($script:LastError -split "`n") | Where-Object { $_ -match 'ERROR' } | Select-Object -First 1)
+                $errType = Classify-Error -ErrorText $script:LastError
+                $errMsg = switch ($errType) {
+                    'auth'    { "Video private / butuh login. Aktifkan cookies di Settings (F2)." }
+                    'network' { "Koneksi bermasalah." }
+                    default   { $errRaw }
+                }
+            }
+            $again = Show-DoneScreen -Result $result -Message $errMsg
+            $script:Settings.Format = $savedFormat
+            if (-not $again) { $running = $false }
+            continue
+        }
 
         $confirm = Show-FormatScreen -FullFeature $fullFeature
         if (-not $confirm) { continue }
