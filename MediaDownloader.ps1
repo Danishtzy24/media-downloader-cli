@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Media Downloader v1.0 - Terminal UI
+    Media Downloader v1.1 - Enhanced Terminal UI
 .DESCRIPTION
     Downloader universal untuk YouTube / TikTok / Twitter / Instagram / Bstation / Gambar.
     - UI statis anti-kedip
@@ -10,9 +10,11 @@
     - Auto-update dari GitHub
     - Auto-cookies dari browser
     - Smart blocklist (bedakan error server vs private/cookies)
+    - Diagnostics mode
+    - Cache management
 #>
 
-$script:AppVersion = '1.0'
+$script:AppVersion = '1.1'
 
 $ErrorActionPreference = 'Stop'
 
@@ -309,7 +311,7 @@ function Get-LatestDownloadedFile {
 # Kalau download gagal berulang, blok platform-nya
 # =====================================================
 $script:BlocklistPath = Join-Path $script:ConfigDir 'blocklist.json'
-$script:Blocklist = @{}   # key = platform name, value = @{ Blocked=$true; Reason=''; FailCount=0 }
+$script:Blocklist = @{}  # key = platform name, value = @{ Blocked=$true; Reason=''; FailCount=0 }
 $script:FailThreshold = 2  # 2x gagal berturut-turut = blok
 
 function Load-Blocklist {
@@ -511,6 +513,185 @@ function Get-ResLabel {
 }
 
 # ============================================
+# DIAGNOSTICS FUNCTION
+# ============================================
+
+function Show-Diagnostics {
+    Clear-Screen
+    Write-Host ""
+    Write-Host "Media Downloader - Diagnostics" -ForegroundColor Cyan
+    Write-Host "=============================" -ForegroundColor Gray
+    Write-Host ""
+    
+    $allOk = $true
+    
+    # Check PowerShell version
+    Write-Host "PowerShell Version: " -NoNewline
+    Write-Host $PSVersionTable.PSVersion.ToString() -ForegroundColor Yellow
+    
+    # Check script version
+    Write-Host "Script Version: " -NoNewline
+    Write-Host "v$script:AppVersion" -ForegroundColor Yellow
+    
+    # Check yt-dlp
+    Write-Host ""
+    Write-Host "Checking yt-dlp..." -ForegroundColor Gray
+    $ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
+    if ($ytDlp) {
+        Write-Host "  [OK] yt-dlp found: " -NoNewline -ForegroundColor Green
+        Write-Host $ytDlp.Source -ForegroundColor Gray
+        try {
+            $version = & yt-dlp --version 2>$null
+            Write-Host "       Version: $version" -ForegroundColor Gray
+        } catch {}
+    } else {
+        Write-Host "  [FAIL] yt-dlp not found in PATH" -ForegroundColor Red
+        $allOk = $false
+    }
+    
+    # Check ffmpeg
+    Write-Host ""
+    Write-Host "Checking ffmpeg..." -ForegroundColor Gray
+    $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    if ($ffmpeg) {
+        Write-Host "  [OK] ffmpeg found: " -NoNewline -ForegroundColor Green
+        Write-Host $ffmpeg.Source -ForegroundColor Gray
+    } else {
+        Write-Host "  [FAIL] ffmpeg not found in PATH" -ForegroundColor Red
+        $allOk = $false
+    }
+    
+    # Check settings
+    Write-Host ""
+    Write-Host "Checking settings..." -ForegroundColor Gray
+    $settingsPath = $script:SettingsPath
+    if (Test-Path $settingsPath) {
+        Write-Host "  [OK] Settings file found" -ForegroundColor Green
+        try {
+            $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+            Write-Host "       Save Dir: $($settings.SaveDir)" -ForegroundColor Gray
+            Write-Host "       Format: $($settings.Format)" -ForegroundColor Gray
+            Write-Host "       Cookies: $($settings.Cookies)" -ForegroundColor Gray
+        } catch {
+            Write-Host "  [WARN] Settings file corrupted, will be recreated" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  [INFO] Settings file not found (will be created on first run)" -ForegroundColor Yellow
+    }
+    
+    # Check blocklist
+    Write-Host ""
+    Write-Host "Checking blocklist..." -ForegroundColor Gray
+    if (Test-Path $script:BlocklistPath) {
+        $blocked = @($script:Blocklist.Keys | Where-Object { $script:Blocklist[$_].Blocked -eq $true })
+        if ($blocked.Count -gt 0) {
+            Write-Host "  [INFO] Blocked platforms: $($blocked -join ', ')" -ForegroundColor Yellow
+        } else {
+            Write-Host "  [OK] No blocked platforms" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  [OK] No blocklist file (no platforms blocked)" -ForegroundColor Green
+    }
+    
+    # Check internet connectivity
+    Write-Host ""
+    Write-Host "Checking internet connectivity..." -ForegroundColor Gray
+    try {
+        $testConnection = Test-NetConnection -ComputerName "github.com" -Port 443 -InformationLevel Quiet -WarningAction SilentlyContinue -ErrorAction Stop
+        if ($testConnection) {
+            Write-Host "  [OK] Internet connection available" -ForegroundColor Green
+        }
+    } catch {
+        try {
+            $testPing = Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet -ErrorAction Stop
+            if ($testPing) {
+                Write-Host "  [OK] Internet connection available" -ForegroundColor Green
+            }
+        } catch {
+            Write-Host "  [FAIL] No internet connection" -ForegroundColor Red
+            $allOk = $false
+        }
+    }
+    
+    # Check for updates
+    Write-Host ""
+    Write-Host "Checking for updates..." -ForegroundColor Gray
+    $updateUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/version.txt"
+    try {
+        $response = Invoke-WebRequest -Uri $updateUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        $remoteVersion = $response.Content.Trim()
+        if ($remoteVersion -and $remoteVersion -ne $script:AppVersion) {
+            Write-Host "  [INFO] Update available: v$remoteVersion" -ForegroundColor Yellow
+            Write-Host "         Run 'Media update' to update" -ForegroundColor Gray
+        } elseif ($remoteVersion) {
+            Write-Host "  [OK] You have the latest version" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  [WARN] Could not check for updates (offline or GitHub unavailable)" -ForegroundColor Yellow
+    }
+    
+    Write-Host ""
+    Write-Host "=============================" -ForegroundColor Gray
+    if ($allOk) {
+        Write-Host "All checks passed!" -ForegroundColor Green
+    } else {
+        Write-Host "Some checks failed. Please review above." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "Press any key to continue..." -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
+
+# ============================================
+# CACHE CLEAR FUNCTION
+# ============================================
+
+function Clear-Cache {
+    Write-Host ""
+    Write-Host "Clearing cache..." -ForegroundColor Cyan
+    Write-Host ""
+    
+    $cleared = 0
+    
+    # Clear local cache
+    $cacheDir = Join-Path $script:ConfigDir "cache"
+    if (Test-Path $cacheDir) {
+        Remove-Item $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "[OK] Local cache cleared" -ForegroundColor Green
+        $cleared++
+    }
+    
+    # Clear yt-dlp cache
+    try {
+        $output = & yt-dlp --rm-cache-dir 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] yt-dlp cache cleared" -ForegroundColor Green
+            $cleared++
+        }
+    } catch {
+        Write-Host "[INFO] yt-dlp cache not found or already cleared" -ForegroundColor Yellow
+    }
+    
+    # Clear temp files
+    $tempPattern = Join-Path $env:TEMP "MediaDownloader_*"
+    $tempFiles = Get-Item -Path $tempPattern -ErrorAction SilentlyContinue
+    if ($tempFiles) {
+        $tempFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Host "[OK] Temp files cleared" -ForegroundColor Green
+        $cleared++
+    }
+    
+    Write-Host ""
+    if ($cleared -gt 0) {
+        Write-Host "Cache clearing complete!" -ForegroundColor Green
+    } else {
+        Write-Host "No cache found to clear." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Start-Sleep -Seconds 2
+}
+
+# ============================================
 # UI HELPERS (SINGLE-WRITE = ZERO FLICKER)
 # ============================================
 
@@ -586,7 +767,7 @@ function Write-PanelLine {
 function Draw-Footer {
     param([string]$Info = '~')
     $row = (Get-TermHeight) - 1
-    $ver = "v$($script:AppVersion)"
+    $ver = "v$script:AppVersion"
     Out-Ansi ((Ansi-Pos $row 0) + "$ESC[2K" + (Ansi-Pos $row 1) + "$FG_DIM$Info$RESET" + (Ansi-Pos $row ((Get-TermWidth) - $ver.Length - 2)) + "$FG_DIM$ver$RESET")
 }
 
@@ -1018,7 +1199,7 @@ function Show-WelcomeScreen {
         $logoStart = [Math]::Max(1, [Math]::Floor($h / 2) - 10)
         Draw-Logo -StartRow $logoStart
         # Tag versi kecil di bawah logo
-        Write-Center -Row ($logoStart + 6) -Text "$FG_DIM Media Downloader $FG_CYAN v$($script:AppVersion)$RESET" -VisibleLen (20 + $script:AppVersion.Length)
+        Write-Center -Row ($logoStart + 6) -Text "$FG_DIM Media Downloader $FG_CYAN v$script:AppVersion$RESET" -VisibleLen (20 + $script:AppVersion.Length)
         $panelRow = $logoStart + 8
     } else {
         $panelRow = [Math]::Max(1, [Math]::Floor($h / 2) - 4)
@@ -1037,7 +1218,7 @@ function Show-WelcomeScreen {
         Write-Center -Row ($folderRow + 4) -Text "$FG_ORANGE$GL_BULLET$RESET  $FG_GRAY$prefText$RESET"
     }
     if (($folderRow + 5) -lt ($h - 1)) {
-        Write-Center -Row ($folderRow + 5) -Text "$FG_DIM ketik 'update' untuk cek versi baru$RESET"
+        Write-Center -Row ($folderRow + 5) -Text "$FG_DIM ketik 'update' untuk cek versi baru, 'doctor' untuk diagnostik$RESET"
     }
 
     $urlBuf   = ''
@@ -1135,12 +1316,30 @@ function Show-WelcomeScreen {
                 $upResult = Check-Update -Manual $true
                 # Kalau ada update, Show-UpdateScreen sudah exit sendiri. Sampai sini artinya tidak update.
                 if ($upResult -eq 'uptodate') {
-                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK Sudah versi terbaru (v$($script:AppVersion))$RESET"
+                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK Sudah versi terbaru (v$script:AppVersion)$RESET"
                 } elseif ($upResult -eq 'error') {
                     Write-Center -Row ($inputRow + 1) -Text "$FG_RED$GL_CROSS Gagal cek update. Cek koneksi internet.$RESET"
                 }
                 Start-Sleep -Milliseconds 1500
                 Write-Line -Row ($inputRow + 1) -Text ''
+                $urlBuf = ''
+                $lastIdx = -1
+                $lastUrl = $null
+                continue
+            }
+
+            # Perintah "doctor": jalankan diagnostik
+            if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'doctor') {
+                Show-Diagnostics
+                $urlBuf = ''
+                $lastIdx = -1
+                $lastUrl = $null
+                continue
+            }
+
+            # Perintah "cache": clear cache
+            if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'cache') {
+                Clear-Cache
                 $urlBuf = ''
                 $lastIdx = -1
                 $lastUrl = $null
@@ -1644,7 +1843,6 @@ function Show-DownloadScreen {
             return Invoke-Download -URL $URL -FormatString $fString -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
         }
     }
-
 }
 
 # ============================================
@@ -1715,6 +1913,7 @@ function Show-PlaylistScreen {
         $newStart = $script:PlWindowStart
         if ($Current -ge ($script:PlWindowStart + $listMax)) { $newStart = $Current - $listMax + 1 }
         elseif ($Current -lt $script:PlWindowStart) { $newStart = $Current }
+
         $script:PlWindowStart = $newStart
 
         for ($r = 0; $r -lt $listMax; $r++) {
@@ -1845,7 +2044,7 @@ function Get-RemoteVersion {
     try {
         # Ambil hanya baris awal (untuk deteksi $script:AppVersion) - lebih cepat
         $content = Invoke-WebRequest -Uri $script:UpdateUrl -UseBasicParsing -TimeoutSec 5
-        if ($content.Content -match '\$script:AppVersion\s*=\s*''([^'']+)''') {
+        if ($content.Content -match '\$script:AppVersion\s*=\s*[''"](\d+\.\d+)[''"]') {
             return $matches[1]
         }
     } catch {}
@@ -1874,7 +2073,7 @@ function Show-UpdateScreen {
     $m = Get-PanelMetrics -MaxWidth 72
 
     Write-Center -Row $centerRow -Text "$FG_CYAN$BOLD Update Tersedia $RESET" -VisibleLen 17
-    Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terinstall :$RESET  $FG_WHITE v$($script:AppVersion)$RESET" -Accent $FG_CYAN
+    Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terinstall :$RESET  $FG_WHITE v$script:AppVersion$RESET" -Accent $FG_CYAN
     Write-PanelLine -Row ($centerRow + 3) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terbaru    :$RESET  $FG_GREEN$BOLD v$NewVersion$RESET" -Accent $FG_CYAN
 
     # Tulis file baru
@@ -1909,7 +2108,7 @@ function Check-Update {
     $timeout = if ($Manual) { 6 } else { 2 }
     try {
         $resp = Invoke-WebRequest -Uri $script:UpdateUrl -UseBasicParsing -TimeoutSec $timeout
-        if ($resp.Content -match '\$script:AppVersion\s*=\s*''([^'']+)''') {
+        if ($resp.Content -match '\$script:AppVersion\s*=\s*[''"](\d+\.\d+)[''"]') {
             $remoteVer = $matches[1]
             if (Is-NewerVersion -Remote $remoteVer -Local $script:AppVersion) {
                 Show-UpdateScreen -NewVersion $remoteVer -FullContent $resp.Content
@@ -1983,7 +2182,7 @@ try {
     while ($running) {
         $url = Show-WelcomeScreen
         if ($null -eq $url) { $running = $false; break }
-        if ($url -eq 'RELOAD') { continue }   # habis dari settings
+        if ($url -eq 'RELOAD') { continue } # habis dari settings
 
         # === Cek blocklist ===
         $detectedPlatform = Detect-Platform -Url $url
@@ -2128,6 +2327,6 @@ try {
 finally {
     try { [Console]::CursorVisible = $true } catch {}
     Clear-Screen
-    Write-Host "$FG_GRAY Terima kasih telah menggunakan Media Downloader v1.0$RESET"
+    Write-Host "$FG_GRAY Terima kasih telah menggunakan Media Downloader v$script:AppVersion$RESET"
     Write-Host ""
 }
