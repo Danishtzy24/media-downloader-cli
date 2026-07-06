@@ -1,4 +1,3 @@
-
 $script:AppVersion = '1.0'
 
 $ErrorActionPreference = 'Stop'
@@ -156,6 +155,95 @@ function Is-FullFeaturePlatform {
 $script:ConfigDir    = Join-Path $env:USERPROFILE '.media-downloader'
 
 # =====================================================
+# AUTO-DETECT MEDIA PLAYER UNTUK AUTOPLAY
+# Scan registry "App Paths" untuk player yang umum dipakai.
+# Default fitur ini OFF - user harus aktifkan manual di Settings (F2).
+# =====================================================
+$script:KnownPlayers = @(
+    @{ Name = 'VLC Media Player';      Exe = 'vlc.exe' }
+    @{ Name = 'PotPlayer';             Exe = 'PotPlayerMini64.exe' }
+    @{ Name = 'PotPlayer (x86)';       Exe = 'PotPlayerMini.exe' }
+    @{ Name = 'MPC-HC (64-bit)';       Exe = 'mpc-hc64.exe' }
+    @{ Name = 'MPC-HC';                Exe = 'mpc-hc.exe' }
+    @{ Name = 'MPV';                   Exe = 'mpv.exe' }
+    @{ Name = 'SMPlayer';              Exe = 'smplayer.exe' }
+    @{ Name = 'KMPlayer';              Exe = 'KMPlayer64.exe' }
+    @{ Name = 'GOM Player';            Exe = 'GOM.exe' }
+    @{ Name = 'Winamp';                Exe = 'winamp.exe' }
+    @{ Name = 'foobar2000';            Exe = 'foobar2000.exe' }
+    @{ Name = 'Windows Media Player';  Exe = 'wmplayer.exe' }
+)
+
+# Cari player yang benar-benar terpasang di PC user via registry "App Paths".
+# Aman: hanya membaca registry, tidak pernah menulis / mengubah apapun.
+function Get-InstalledMediaPlayers {
+    $found = @()
+    $appPathsRoots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths'
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths'
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths'
+    )
+
+    foreach ($p in $script:KnownPlayers) {
+        foreach ($root in $appPathsRoots) {
+            $fullRegPath = Join-Path $root $p.Exe
+            if (Test-Path $fullRegPath) {
+                try {
+                    $exePath = (Get-ItemProperty -Path $fullRegPath -ErrorAction Stop).'(default)'
+                    if ($exePath) {
+                        $exePath = [string]$exePath -replace '^"|"$', ''
+                        if ((Test-Path $exePath -ErrorAction SilentlyContinue) -and ($found.Path -notcontains $exePath)) {
+                            $found += [PSCustomObject]@{ Name = $p.Name; Path = $exePath }
+                        }
+                    }
+                } catch {}
+                break   # sudah ketemu exe ini di salah satu root, tidak perlu cek root lain
+            }
+        }
+    }
+    return $found
+}
+
+# Jalankan file media dengan player pilihan user. Aman terhadap:
+# - file tidak ada
+# - fitur di-off-kan
+# - player yang dulu dipilih ternyata sudah di-uninstall (fallback ke default Windows)
+function Invoke-AutoplayMedia {
+    param([string]$FilePath)
+
+    if (-not $FilePath -or -not (Test-Path $FilePath)) { return }
+    $choice = [string]$script:Settings.AutoplayPlayer
+    if (-not $choice -or $choice -eq 'off') { return }
+
+    try {
+        if ($choice -eq 'default') {
+            Invoke-Item -Path $FilePath -ErrorAction Stop
+        }
+        elseif (Test-Path $choice) {
+            Start-Process -FilePath $choice -ArgumentList "`"$FilePath`"" -ErrorAction Stop
+        }
+        else {
+            # Player yang tersimpan sudah tidak ada di sistem -> fallback aman ke default Windows
+            Invoke-Item -Path $FilePath -ErrorAction SilentlyContinue
+        }
+    } catch {
+        try { Invoke-Item -Path $FilePath -ErrorAction SilentlyContinue } catch {}
+    }
+}
+
+# Cari file media yang PALING BARU dibuat di folder tujuan (hasil download barusan)
+function Get-LatestDownloadedFile {
+    param([string]$Dir)
+    if (-not (Test-Path $Dir)) { return $null }
+    try {
+        return Get-ChildItem -Path $Dir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -match '^\.(mp3|mp4|mkv|webm|m4a|wav|ogg|flac|avi|mov)$' } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+    } catch { return $null }
+}
+
+# =====================================================
 # BLOCKLIST PERMANEN (per platform)
 # Kalau download gagal berulang, blok platform-nya
 # =====================================================
@@ -249,7 +337,11 @@ $script:Settings = [PSCustomObject]@{
     MaxRes    = 0
     SaveDir   = $defaultDir
     Format    = 'mp4'   # 'mp4' atau 'mp3'
-    Cookies   = 'auto'  # 'off' | 'auto' | 'chrome' | 'edge' | 'firefox' | 'brave' | 'opera' | 'vivaldi'
+    Cookies   = 'off'  # 'off' | 'auto' | 'chrome' | 'edge' | 'firefox' | 'brave' | 'opera' | 'vivaldi'
+                       # Default OFF: cookies hanya diaktifkan manual di Settings kalau memang perlu (video private/login).
+                       # Kalau 'on' terus, browser yang sedang terbuka bisa mengunci file cookie dan
+                       # menyebabkan SEMUA fetch (termasuk video publik) gagal total.
+    AutoplayPlayer = 'off'  # 'off' | 'default' | '<path exe player>' - default OFF
 }
 
 # Opsi cookies
@@ -308,6 +400,7 @@ function Load-Settings {
             if ($null -ne $j.MaxRes) { $script:Settings.MaxRes = [int]$j.MaxRes }
             if ($j.Format -and ($j.Format -eq 'mp3' -or $j.Format -eq 'mp4')) { $script:Settings.Format = [string]$j.Format }
             if ($j.Cookies) { $script:Settings.Cookies = [string]$j.Cookies }
+            if ($j.AutoplayPlayer) { $script:Settings.AutoplayPlayer = [string]$j.AutoplayPlayer }
             if ($j.SaveDir) {
                 $d = Ensure-Dir -Path ([string]$j.SaveDir)
                 $script:Settings.SaveDir = $d
@@ -1010,10 +1103,10 @@ function Show-SettingsScreen {
 
     $h = Get-TermHeight
     $m = Get-PanelMetrics -MaxWidth 64
-    $top = [Math]::Max(1, [Math]::Floor($h / 2) - 6)
+    $top = [Math]::Max(1, [Math]::Floor($h / 2) - 7)
 
     Write-Center -Row $top -Text "$FG_WHITE${BOLD}Settings$RESET" -VisibleLen 8
-    Write-Center -Row ($top + 8) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   $GL_LEFT$GL_RIGHT ubah   enter edit folder   esc simpan & kembali$RESET"
+    Write-Center -Row ($top + 9) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   $GL_LEFT$GL_RIGHT ubah   enter edit folder   esc simpan & kembali$RESET"
 
     # index posisi
     $audioIdx = 0
@@ -1030,17 +1123,40 @@ function Show-SettingsScreen {
     for ($i = 0; $i -lt $script:CookieOptions.Count; $i++) {
         if ($script:CookieOptions[$i].Code -eq $script:Settings.Cookies) { $cookieIdx = $i; break }
     }
+
+    # === Bangun daftar player: Off, Default Windows, lalu semua player terdeteksi ===
+    $detectedPlayers = Get-InstalledMediaPlayers
+    $playerOptions = @(
+        @{ Code = 'off';     Label = 'Off (tidak autoplay)' }
+        @{ Code = 'default'; Label = 'Default aplikasi Windows' }
+    )
+    foreach ($dp in $detectedPlayers) { $playerOptions += @{ Code = $dp.Path; Label = $dp.Name } }
+    $playerIdx = 0
+    for ($i = 0; $i -lt $playerOptions.Count; $i++) {
+        if ($playerOptions[$i].Code -eq $script:Settings.AutoplayPlayer) { $playerIdx = $i; break }
+    }
+    # Kalau player yang tersimpan sudah tidak terdeteksi (mis. sudah di-uninstall), fallback ke Off
+    if ($playerIdx -eq 0 -and $script:Settings.AutoplayPlayer -ne 'off' -and $script:Settings.AutoplayPlayer -ne 'default') {
+        $isKnown = $false
+        foreach ($po in $playerOptions) { if ($po.Code -eq $script:Settings.AutoplayPlayer) { $isKnown = $true } }
+        if (-not $isKnown) { $playerIdx = 0 }
+    }
+
     $folderBuf = $script:Settings.SaveDir
 
-    $sel = 0          # 0=format, 1=audio, 2=res, 3=cookies, 4=folder
+    $sel = 0          # 0=format, 1=audio, 2=res, 3=cookies, 4=autoplay, 5=folder
     $editMode = $false
     $dirty = $true
+    $totalRows = 6
 
     while ($true) {
         if ($dirty) {
             $fmtLabel = $formatOptions[$formatIdx]
             $aLabel = $script:AudioLangOptions[$audioIdx].Label
             $rLabel = Get-ResLabel $script:ResOptions[$resIdx]
+            $ckLabel = $script:CookieOptions[$cookieIdx].Label
+            $plLabel = $playerOptions[$playerIdx].Label
+
             # label "Folder          " = 16 char, sisakan 1 utk kursor
             $fMax = [Math]::Max(8, $m.Inner - 17)
             # tampilkan BAGIAN AKHIR path saat diedit (posisi ketik selalu terlihat)
@@ -1050,8 +1166,7 @@ function Show-SettingsScreen {
                 else { $fText = Limit-Text -Text $fText -Max $fMax }
             }
 
-            $ckLabel = $script:CookieOptions[$cookieIdx].Label
-            for ($r = 0; $r -lt 5; $r++) {
+            for ($r = 0; $r -lt $totalRows; $r++) {
                 $row = $top + 2 + $r
                 $isSel = ($sel -eq $r)
                 $accent = if ($isSel) { $FG_BLUE } else { $FG_DIM }
@@ -1064,6 +1179,10 @@ function Show-SettingsScreen {
                     2 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Resolusi maks   $FG_DIM$GL_LEFT$RESET $tcolor$bold$rLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
                     3 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Auto cookies    $FG_DIM$GL_LEFT$RESET $tcolor$bold$ckLabel$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
                     4 {
+                        $plText = Limit-Text -Text $plLabel -Max ([Math]::Max(10, $m.Inner - 19))
+                        Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Autoplay        $FG_DIM$GL_LEFT$RESET $tcolor$bold$plText$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent
+                    }
+                    5 {
                         $cursorGlyph = if ($editMode -and $isSel) { "$FG_BLUE$GL_FULL$RESET" } else { '' }
                         $fcolor = if ($editMode -and $isSel) { $FG_WHITE } else { $tcolor }
                         Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Folder          $fcolor$bold$fText$RESET$cursorGlyph" -Accent $accent
@@ -1075,7 +1194,7 @@ function Show-SettingsScreen {
 
         $key = [Console]::ReadKey($true)
 
-        if ($editMode -and $sel -eq 4) {
+        if ($editMode -and $sel -eq 5) {
             if ($key.Key -eq 'Enter') { $editMode = $false; $dirty = $true }
             elseif ($key.Key -eq 'Escape') { $editMode = $false; $folderBuf = $script:Settings.SaveDir; $dirty = $true }
             elseif ($key.Key -eq 'Backspace') { if ($folderBuf.Length -gt 0) { $folderBuf = $folderBuf.Substring(0, $folderBuf.Length - 1); $dirty = $true } }
@@ -1092,14 +1211,15 @@ function Show-SettingsScreen {
 
         $dirty = $true
         switch ($key.Key) {
-            'UpArrow'   { $sel = ($sel + 4) % 5 }
-            'DownArrow' { $sel = ($sel + 1) % 5 }
+            'UpArrow'   { $sel = ($sel + $totalRows - 1) % $totalRows }
+            'DownArrow' { $sel = ($sel + 1) % $totalRows }
             'LeftArrow' {
                 switch ($sel) {
                     0 { $formatIdx = ($formatIdx + 1) % 2 }
                     1 { $audioIdx = ($audioIdx + $script:AudioLangOptions.Count - 1) % $script:AudioLangOptions.Count }
                     2 { $resIdx = ($resIdx + $script:ResOptions.Count - 1) % $script:ResOptions.Count }
                     3 { $cookieIdx = ($cookieIdx + $script:CookieOptions.Count - 1) % $script:CookieOptions.Count }
+                    4 { $playerIdx = ($playerIdx + $playerOptions.Count - 1) % $playerOptions.Count }
                 }
             }
             'RightArrow' {
@@ -1108,15 +1228,17 @@ function Show-SettingsScreen {
                     1 { $audioIdx = ($audioIdx + 1) % $script:AudioLangOptions.Count }
                     2 { $resIdx = ($resIdx + 1) % $script:ResOptions.Count }
                     3 { $cookieIdx = ($cookieIdx + 1) % $script:CookieOptions.Count }
+                    4 { $playerIdx = ($playerIdx + 1) % $playerOptions.Count }
                 }
             }
             'Enter' {
-                if ($sel -eq 4) { $editMode = $true; $dirty = $true }
+                if ($sel -eq 5) { $editMode = $true; $dirty = $true }
                 else {
                     $script:Settings.Format = if ($formatIdx -eq 1) { 'mp3' } else { 'mp4' }
                     $script:Settings.AudioLang = $script:AudioLangOptions[$audioIdx].Code
                     $script:Settings.MaxRes = $script:ResOptions[$resIdx]
                     $script:Settings.Cookies = $script:CookieOptions[$cookieIdx].Code
+                    $script:Settings.AutoplayPlayer = [string]$playerOptions[$playerIdx].Code
                     $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
                     $script:SaveDir = $script:Settings.SaveDir
                     Save-Settings
@@ -1128,6 +1250,7 @@ function Show-SettingsScreen {
                 $script:Settings.AudioLang = $script:AudioLangOptions[$audioIdx].Code
                 $script:Settings.MaxRes = $script:ResOptions[$resIdx]
                 $script:Settings.Cookies = $script:CookieOptions[$cookieIdx].Code
+                $script:Settings.AutoplayPlayer = [string]$playerOptions[$playerIdx].Code
                 $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
                 $script:SaveDir = $script:Settings.SaveDir
                 Save-Settings
@@ -1145,6 +1268,7 @@ function Show-SettingsScreen {
 function Invoke-FetchJson {
     param([string]$URL, [string]$Message, [bool]$Flat)
 
+    $script:LastError = ''
     Clear-Screen
     Draw-Footer
 
@@ -1155,14 +1279,31 @@ function Invoke-FetchJson {
     $ck = Get-CookieBrowserForYtdlp
     $job = Start-Job -ScriptBlock {
         param($u, $fa, $ck)
-        try {
-            if ($ck) {
-                $json = & yt-dlp -J $fa --cookies-from-browser $ck --extractor-args "youtube:player_client=all" --no-warnings $u 2>$null
-            } else {
-                $json = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>$null
+
+        # Coba dengan cookies dulu (kalau diminta). Kalau gagal / kosong, fallback TANPA cookies.
+        # Ini mencegah 1 masalah cookie (browser terkunci dll) membuat SEMUA fetch gagal total.
+        if ($ck) {
+            $errOutput = & yt-dlp -J $fa --cookies-from-browser $ck --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
+            $json = $errOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
+            $errText = ($errOutput | Where-Object { $_ -isnot [string] -or -not $_.TrimStart().StartsWith('{') }) -join "`n"
+
+            if ($json) {
+                return @{ Success = $true; Data = ($json -join ''); Error = '' }
             }
-            return @{ Success = $true; Data = ($json -join '') }
-        } catch { return @{ Success = $false; Error = $_.ToString() } }
+            # fallback tanpa cookies
+            $errOutput2 = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
+            $json2 = $errOutput2 | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
+            $errText2 = ($errOutput2 | Where-Object { $_ -isnot [string] -or -not $_.TrimStart().StartsWith('{') }) -join "`n"
+            if ($json2) { return @{ Success = $true; Data = ($json2 -join ''); Error = '' } }
+            return @{ Success = $false; Data = $null; Error = "$errText`n$errText2" }
+        }
+        else {
+            $errOutput = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
+            $json = $errOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
+            $errText = ($errOutput | Where-Object { $_ -isnot [string] -or -not $_.TrimStart().StartsWith('{') }) -join "`n"
+            if ($json) { return @{ Success = $true; Data = ($json -join ''); Error = '' } }
+            return @{ Success = $false; Data = $null; Error = $errText }
+        }
     } -ArgumentList $URL, $flatArg, $ck
 
     $shortUrl = Limit-Text -Text $URL -Max ([Math]::Max(20, (Get-TermWidth) - 8))
@@ -1191,8 +1332,15 @@ function Invoke-FetchJson {
     $result = Receive-Job -Job $job
     Remove-Job -Job $job -Force
 
-    if (-not $result -or -not $result.Success -or -not $result.Data) { return $null }
-    try { return ($result.Data | ConvertFrom-Json) } catch { return $null }
+    if (-not $result -or -not $result.Success -or -not $result.Data) {
+        $script:LastError = if ($result -and $result.Error) { [string]$result.Error } else { 'yt-dlp tidak mengembalikan data' }
+        return $null
+    }
+    $script:LastError = ''
+    try { return ($result.Data | ConvertFrom-Json) } catch {
+        $script:LastError = 'Gagal parse JSON dari yt-dlp'
+        return $null
+    }
 }
 
 # ============================================
@@ -1769,6 +1917,12 @@ try {
         # Update blocklist tracking
         if ($result -eq 'ok') {
             Record-PlatformSuccess -Platform $detectedPlatform
+
+            # Autoplay (kalau diaktifkan di Settings) - cari file hasil download barusan
+            $latestFile = Get-LatestDownloadedFile -Dir $script:SaveDir
+            if ($latestFile) {
+                Invoke-AutoplayMedia -FilePath $latestFile.FullName
+            }
         } elseif ($result -eq 'fail') {
             Record-PlatformFail -Platform $detectedPlatform -Reason 'Download gagal' -ErrorText $script:LastError
         }
