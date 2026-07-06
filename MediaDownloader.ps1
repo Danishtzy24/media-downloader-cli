@@ -204,10 +204,43 @@ function Get-InstalledMediaPlayers {
     return $found
 }
 
-# Jalankan file media dengan player pilihan user. Aman terhadap:
-# - file tidak ada
-# - fitur di-off-kan
-# - player yang dulu dipilih ternyata sudah di-uninstall (fallback ke default Windows)
+# Baca player DEFAULT dari Windows Settings (registry UserChoice per-ekstensi).
+# Jadi kalau user set VLC sebagai default .mp4 di Settings Windows, kita pakai VLC.
+function Get-WindowsDefaultMediaPlayer {
+    param([string]$Extension = '.mp4')
+
+    try {
+        $userChoicePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Extension\UserChoice"
+        if (Test-Path $userChoicePath) {
+            $progId = (Get-ItemProperty -Path $userChoicePath -Name 'ProgId' -ErrorAction SilentlyContinue).ProgId
+            if ($progId) {
+                # HKCR perlu di-mount sebagai drive kalau belum ada
+                if (-not (Get-PSDrive -Name HKCR -ErrorAction SilentlyContinue)) {
+                    New-PSDrive -Name HKCR -PSProvider Registry -Root HKEY_CLASSES_ROOT -Scope Script -ErrorAction SilentlyContinue | Out-Null
+                }
+                $commandPath = "HKCR:\$progId\shell\open\command"
+                if (Test-Path $commandPath) {
+                    $command = (Get-ItemProperty -Path $commandPath -ErrorAction SilentlyContinue).'(default)'
+                    if ($command) {
+                        if ($command -match '"([^"]+\.exe)"') { return $matches[1] }
+                        elseif ($command -match '^([^\s]+\.exe)') { return $matches[1] }
+                    }
+                }
+            }
+        }
+    } catch {}
+
+    # Fallback: Windows Media Player klasik
+    $wmp = "$env:ProgramFiles\Windows Media Player\wmplayer.exe"
+    if (Test-Path $wmp) { return $wmp }
+    return $null
+}
+
+# Jalankan file media. Prioritas:
+# 1. 'off'      -> tidak melakukan apa-apa
+# 2. 'default'  -> pakai player default dari WINDOWS SETTINGS (per ekstensi file)
+# 3. path exe   -> player spesifik pilihan user di Settings aplikasi
+# Selalu punya fallback aman, tidak pernah crash.
 function Invoke-AutoplayMedia {
     param([string]$FilePath)
 
@@ -217,13 +250,20 @@ function Invoke-AutoplayMedia {
 
     try {
         if ($choice -eq 'default') {
-            Invoke-Item -Path $FilePath -ErrorAction Stop
+            # Baca default player dari Windows Settings sesuai ekstensi file
+            $ext = [System.IO.Path]::GetExtension($FilePath)
+            $defaultExe = Get-WindowsDefaultMediaPlayer -Extension $ext
+            if ($defaultExe -and (Test-Path $defaultExe)) {
+                Start-Process -FilePath $defaultExe -ArgumentList "`"$FilePath`"" -ErrorAction Stop
+            } else {
+                Invoke-Item -Path $FilePath -ErrorAction Stop
+            }
         }
         elseif (Test-Path $choice) {
             Start-Process -FilePath $choice -ArgumentList "`"$FilePath`"" -ErrorAction Stop
         }
         else {
-            # Player yang tersimpan sudah tidak ada di sistem -> fallback aman ke default Windows
+            # Player yang tersimpan sudah tidak ada di sistem -> fallback aman
             Invoke-Item -Path $FilePath -ErrorAction SilentlyContinue
         }
     } catch {
@@ -341,7 +381,8 @@ $script:Settings = [PSCustomObject]@{
                        # Default OFF: cookies hanya diaktifkan manual di Settings kalau memang perlu (video private/login).
                        # Kalau 'on' terus, browser yang sedang terbuka bisa mengunci file cookie dan
                        # menyebabkan SEMUA fetch (termasuk video publik) gagal total.
-    AutoplayPlayer = 'off'  # 'off' | 'default' | '<path exe player>' - default OFF
+    AutoplayPlayer = 'default'  # 'off' | 'default' (player default Windows) | '<path exe player>'
+    AutoUpdate     = $true      # auto-cek GitHub tiap start; kalau ada versi baru -> update & restart
 }
 
 # Opsi cookies
@@ -401,6 +442,7 @@ function Load-Settings {
             if ($j.Format -and ($j.Format -eq 'mp3' -or $j.Format -eq 'mp4')) { $script:Settings.Format = [string]$j.Format }
             if ($j.Cookies) { $script:Settings.Cookies = [string]$j.Cookies }
             if ($j.AutoplayPlayer) { $script:Settings.AutoplayPlayer = [string]$j.AutoplayPlayer }
+            if ($null -ne $j.AutoUpdate) { $script:Settings.AutoUpdate = [bool]$j.AutoUpdate }
             if ($j.SaveDir) {
                 $d = Ensure-Dir -Path ([string]$j.SaveDir)
                 $script:Settings.SaveDir = $d
@@ -762,13 +804,23 @@ function Invoke-Download {
     if ($ck) { $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($ck) }
 
     if ($OutputFormat -eq 'mp3') {
-        # AUDIO ONLY MODE
+        # AUDIO ONLY MODE - dengan COVER ART lengkap
         $ytArgs.Add("-f"); $ytArgs.Add("bestaudio/best")
         $ytArgs.Add("--extract-audio")
         $ytArgs.Add("--audio-format"); $ytArgs.Add("mp3")
         $ytArgs.Add("--audio-quality"); $ytArgs.Add("0")   # kualitas terbaik
+
+        # COVER ART: convert thumbnail ke jpg (kompatibel ID3) lalu embed ke MP3.
+        # Tidak pakai --write-thumbnail agar tidak ada file .jpg sisa di folder.
+        $ytArgs.Add("--convert-thumbnails"); $ytArgs.Add("jpg")
         $ytArgs.Add("--embed-thumbnail")
-        $ytArgs.Add("--add-metadata")
+        # Crop thumbnail 16:9 menjadi persegi 1:1 seperti cover album musik
+        $ytArgs.Add("--ppa"); $ytArgs.Add("ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -vf crop=ih:ih")
+
+        # METADATA: judul, artist, album, tanggal -> terbaca oleh semua music player
+        $ytArgs.Add("--embed-metadata")
+        $ytArgs.Add("--parse-metadata"); $ytArgs.Add("%(artist,uploader,channel)s:%(meta_artist)s")
+        $ytArgs.Add("--parse-metadata"); $ytArgs.Add("%(album,playlist_title,title)s:%(meta_album)s")
     } else {
         # VIDEO MODE
         $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
@@ -962,6 +1014,9 @@ function Show-WelcomeScreen {
         $prefText = "Format: $($script:Settings.Format.ToUpper())  $GL_DOT  Dubbing: $(Get-AudioLangLabel $script:Settings.AudioLang)  $GL_DOT  Resolusi: $(Get-ResLabel $script:Settings.MaxRes)"
         Write-Center -Row ($folderRow + 4) -Text "$FG_ORANGE$GL_BULLET$RESET  $FG_GRAY$prefText$RESET"
     }
+    if (($folderRow + 5) -lt ($h - 1)) {
+        Write-Center -Row ($folderRow + 5) -Text "$FG_DIM ketik 'update' untuk cek versi baru$RESET"
+    }
 
     $urlBuf   = ''
     $dirBuf   = $script:SaveDir
@@ -1052,6 +1107,24 @@ function Show-WelcomeScreen {
                 continue
             }
 
+            # Perintah "update": cek update manual dari GitHub
+            if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'update') {
+                Write-Center -Row ($inputRow + 1) -Text "$FG_CYAN$($script:SpinChars[0]) Mengecek update dari GitHub...$RESET"
+                $upResult = Check-Update -Manual $true
+                # Kalau ada update, Show-UpdateScreen sudah exit sendiri. Sampai sini artinya tidak update.
+                if ($upResult -eq 'uptodate') {
+                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK Sudah versi terbaru (v$($script:AppVersion))$RESET"
+                } elseif ($upResult -eq 'error') {
+                    Write-Center -Row ($inputRow + 1) -Text "$FG_RED$GL_CROSS Gagal cek update. Cek koneksi internet.$RESET"
+                }
+                Start-Sleep -Milliseconds 1500
+                Write-Line -Row ($inputRow + 1) -Text ''
+                $urlBuf = ''
+                $lastIdx = -1
+                $lastUrl = $null
+                continue
+            }
+
             if ($urlBuf.Trim()) {
                 $dir = $dirBuf.Trim()
                 if (-not $dir) { $dir = $script:Settings.SaveDir }
@@ -1106,7 +1179,7 @@ function Show-SettingsScreen {
     $top = [Math]::Max(1, [Math]::Floor($h / 2) - 7)
 
     Write-Center -Row $top -Text "$FG_WHITE${BOLD}Settings$RESET" -VisibleLen 8
-    Write-Center -Row ($top + 9) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   $GL_LEFT$GL_RIGHT ubah   enter edit folder   esc simpan & kembali$RESET"
+    Write-Center -Row ($top + 10) -Text "$FG_DIM$GL_UP$GL_DOWN pilih   $GL_LEFT$GL_RIGHT ubah   enter edit folder   esc simpan & kembali$RESET"
 
     # index posisi
     $audioIdx = 0
@@ -1143,11 +1216,13 @@ function Show-SettingsScreen {
     }
 
     $folderBuf = $script:Settings.SaveDir
+    $updateIdx = if ($script:Settings.AutoUpdate) { 0 } else { 1 }
+    $updateOptions = @('On (cek tiap start)', 'Off (manual)')
 
-    $sel = 0          # 0=format, 1=audio, 2=res, 3=cookies, 4=autoplay, 5=folder
+    $sel = 0          # 0=format, 1=audio, 2=res, 3=cookies, 4=autoplay, 5=autoupdate, 6=folder
     $editMode = $false
     $dirty = $true
-    $totalRows = 6
+    $totalRows = 7
 
     while ($true) {
         if ($dirty) {
@@ -1182,7 +1257,8 @@ function Show-SettingsScreen {
                         $plText = Limit-Text -Text $plLabel -Max ([Math]::Max(10, $m.Inner - 19))
                         Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Autoplay        $FG_DIM$GL_LEFT$RESET $tcolor$bold$plText$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent
                     }
-                    5 {
+                    5 { Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Auto update     $FG_DIM$GL_LEFT$RESET $tcolor$bold$($updateOptions[$updateIdx])$RESET $FG_DIM$GL_RIGHT$RESET" -Accent $accent }
+                    6 {
                         $cursorGlyph = if ($editMode -and $isSel) { "$FG_BLUE$GL_FULL$RESET" } else { '' }
                         $fcolor = if ($editMode -and $isSel) { $FG_WHITE } else { $tcolor }
                         Write-PanelLine -Row $row -Col $m.Col -Width $m.Width -Text "${tcolor}Folder          $fcolor$bold$fText$RESET$cursorGlyph" -Accent $accent
@@ -1194,7 +1270,7 @@ function Show-SettingsScreen {
 
         $key = [Console]::ReadKey($true)
 
-        if ($editMode -and $sel -eq 5) {
+        if ($editMode -and $sel -eq 6) {
             if ($key.Key -eq 'Enter') { $editMode = $false; $dirty = $true }
             elseif ($key.Key -eq 'Escape') { $editMode = $false; $folderBuf = $script:Settings.SaveDir; $dirty = $true }
             elseif ($key.Key -eq 'Backspace') { if ($folderBuf.Length -gt 0) { $folderBuf = $folderBuf.Substring(0, $folderBuf.Length - 1); $dirty = $true } }
@@ -1220,6 +1296,7 @@ function Show-SettingsScreen {
                     2 { $resIdx = ($resIdx + $script:ResOptions.Count - 1) % $script:ResOptions.Count }
                     3 { $cookieIdx = ($cookieIdx + $script:CookieOptions.Count - 1) % $script:CookieOptions.Count }
                     4 { $playerIdx = ($playerIdx + $playerOptions.Count - 1) % $playerOptions.Count }
+                    5 { $updateIdx = ($updateIdx + 1) % 2 }
                 }
             }
             'RightArrow' {
@@ -1229,16 +1306,18 @@ function Show-SettingsScreen {
                     2 { $resIdx = ($resIdx + 1) % $script:ResOptions.Count }
                     3 { $cookieIdx = ($cookieIdx + 1) % $script:CookieOptions.Count }
                     4 { $playerIdx = ($playerIdx + 1) % $playerOptions.Count }
+                    5 { $updateIdx = ($updateIdx + 1) % 2 }
                 }
             }
             'Enter' {
-                if ($sel -eq 5) { $editMode = $true; $dirty = $true }
+                if ($sel -eq 6) { $editMode = $true; $dirty = $true }
                 else {
                     $script:Settings.Format = if ($formatIdx -eq 1) { 'mp3' } else { 'mp4' }
                     $script:Settings.AudioLang = $script:AudioLangOptions[$audioIdx].Code
                     $script:Settings.MaxRes = $script:ResOptions[$resIdx]
                     $script:Settings.Cookies = $script:CookieOptions[$cookieIdx].Code
                     $script:Settings.AutoplayPlayer = [string]$playerOptions[$playerIdx].Code
+                    $script:Settings.AutoUpdate = ($updateIdx -eq 0)
                     $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
                     $script:SaveDir = $script:Settings.SaveDir
                     Save-Settings
@@ -1251,6 +1330,7 @@ function Show-SettingsScreen {
                 $script:Settings.MaxRes = $script:ResOptions[$resIdx]
                 $script:Settings.Cookies = $script:CookieOptions[$cookieIdx].Code
                 $script:Settings.AutoplayPlayer = [string]$playerOptions[$playerIdx].Code
+                $script:Settings.AutoUpdate = ($updateIdx -eq 0)
                 $script:Settings.SaveDir = Ensure-Dir -Path $folderBuf
                 $script:SaveDir = $script:Settings.SaveDir
                 Save-Settings
@@ -1786,18 +1866,28 @@ function Show-UpdateScreen {
 }
 
 function Check-Update {
-    # Non-blocking: jangan hang kalau internet lemot
+    param([bool]$Manual = $false)
+    # Non-blocking: jangan hang kalau internet lemot.
+    # Timeout singkat saat auto-check startup (2s) supaya app terasa cepat;
+    # manual check (ketik 'update') diberi waktu lebih (6s).
+    $timeout = if ($Manual) { 6 } else { 2 }
     try {
-        $resp = Invoke-WebRequest -Uri $script:UpdateUrl -UseBasicParsing -TimeoutSec 5
+        $resp = Invoke-WebRequest -Uri $script:UpdateUrl -UseBasicParsing -TimeoutSec $timeout
         if ($resp.Content -match '\$script:AppVersion\s*=\s*''([^'']+)''') {
             $remoteVer = $matches[1]
             if (Is-NewerVersion -Remote $remoteVer -Local $script:AppVersion) {
                 Show-UpdateScreen -NewVersion $remoteVer -FullContent $resp.Content
+                return $true
+            }
+            elseif ($Manual) {
+                return 'uptodate'   # untuk feedback "sudah versi terbaru"
             }
         }
     } catch {
+        if ($Manual) { return 'error' }
         # Diam saja kalau gagal cek (offline / GitHub down)
     }
+    return $false
 }
 
 function Test-Dependencies {
@@ -1830,8 +1920,10 @@ try {
     Load-Blocklist
     if (-not (Test-Dependencies)) { exit }
 
-    # Auto-update check (silent, non-blocking failure)
-    Check-Update
+    # Auto-update check (hanya kalau diaktifkan di Settings; default On)
+    if ($script:Settings.AutoUpdate) {
+        [void](Check-Update)
+    }
 
     $running = $true
     while ($running) {
