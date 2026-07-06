@@ -1,5 +1,4 @@
 
-
 $ErrorActionPreference = "Stop"
 
 $RepoRawUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/MediaDownloader.ps1"
