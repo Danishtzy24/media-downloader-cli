@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Media Downloader v1.0 - Enhanced Installer
-
+    Media Downloader v1.0 - Enhanced Installer (Fixed)
+    
     Install:
         irm https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1 | iex
-
+    
     Commands after installation:
         Media             - Run application
         Media update      - Check and apply updates
@@ -18,7 +18,6 @@
 $ErrorActionPreference = "Stop"
 
 $RepoRawUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/MediaDownloader.ps1"
-$RepoVersionUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/version.txt"
 
 $ESC = [char]27
 $C_CYAN  = "$ESC[38;2;120;220;220m"
@@ -47,217 +46,16 @@ function Test-CommandExists {
     }
 }
 
-function Test-WingetInstalled {
-    # Check multiple ways winget might be installed
-    $wingetPaths = @(
-        "$env:LOCALAPPDATA\Microsoft\WindowsApps\winget.exe",
-        "$env:ProgramFiles\WindowsApps\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\winget.exe"
-    )
-    
-    foreach ($path in $wingetPaths) {
-        if (Test-Path $path) { return $true }
-    }
-    
-    return (Test-CommandExists -Command "winget")
+function Pause {
+    Write-Host ""
+    Write-Host "Tekan tombol apapun untuk melanjutkan..." -ForegroundColor Yellow
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 }
 
-function Test-YtDlpInstalled {
-    if (Test-CommandExists -Command "yt-dlp") {
-        return $true
-    }
-    
-    # Also check in our installation directory
-    $localPath = Join-Path $env:USERPROFILE ".media-downloader\yt-dlp.exe"
-    if (Test-Path $localPath) {
-        return $true
-    }
-    
-    return $false
-}
+# ============================================
+# MAIN INSTALLATION LOGIC
+# ============================================
 
-function Test-FFmpegInstalled {
-    return (Test-CommandExists -Command "ffmpeg")
-}
-
-function Get-InstalledVersion {
-    $scriptPath = Join-Path $env:USERPROFILE ".media-downloader\MediaDownloader.ps1"
-    if (Test-Path $scriptPath) {
-        try {
-            $content = Get-Content $scriptPath -Raw
-            if ($content -match '\$script:AppVersion\s*=\s*[''"](\d+\.\d+)[''"]') {
-                return $matches[1]
-            }
-        } catch {}
-    }
-    return $null
-}
-
-function Get-RemoteVersion {
-    try {
-        $response = Invoke-WebRequest -Uri $RepoVersionUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        return $response.Content.Trim()
-    } catch {
-        # Fallback: try to extract from main script
-        try {
-            $response = Invoke-WebRequest -Uri $RepoRawUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-            if ($response.Content -match '\$script:AppVersion\s*=\s*[''"](\d+\.\d+)[''"]') {
-                return $matches[1]
-            }
-        } catch {}
-    }
-    return $null
-}
-
-function Install-Dependencies {
-    param([bool]$Silent = $false)
-    
-    $dependencies = @()
-    $installed = @()
-    $failed = @()
-    
-    # Check and install winget if needed
-    if (-not (Test-WingetInstalled)) {
-        Write-ColorOutput "  [!] winget not found. Please install App Installer from Microsoft Store." $C_RED
-        Write-ColorOutput "     Then run this installer again." $C_YELLOW
-        return $false
-    }
-    
-    # Check and install yt-dlp
-    if (-not (Test-YtDlpInstalled)) {
-        Write-ColorOutput "  [1/2] Installing yt-dlp..." $C_GRAY
-        try {
-            $proc = Start-Process -FilePath "winget" -ArgumentList "install yt-dlp --silent --accept-package-agreements --accept-source-agreements" -NoNewWindow -PassThru -Wait
-            if ($proc.ExitCode -eq 0) {
-                # Refresh PATH
-                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-                
-                if (Test-YtDlpInstalled) {
-                    Write-ColorOutput "        Success!" $C_GREEN
-                    $installed += "yt-dlp"
-                } else {
-                    # Try installing to local directory as fallback
-                    Write-ColorOutput "        Trying alternative installation method..." $C_YELLOW
-                    Install-YtDlpManual
-                }
-            } else {
-                Write-ColorOutput "        Failed (Exit code: $($proc.ExitCode))" $C_RED
-                $failed += "yt-dlp"
-            }
-        } catch {
-            Write-ColorOutput "        Error: $_" $C_RED
-            $failed += "yt-dlp"
-        }
-    } else {
-        Write-ColorOutput "  [1/2] yt-dlp already installed." $C_GREEN
-    }
-    
-    # Check ffmpeg (usually comes with yt-dlp via winget)
-    if (-not (Test-FFmpegInstalled)) {
-        Write-ColorOutput "  [2/2] Installing ffmpeg..." $C_GRAY
-        try {
-            $proc = Start-Process -FilePath "winget" -ArgumentList "install ffmpeg --silent --accept-package-agreements --accept-source-agreements" -NoNewWindow -PassThru -Wait
-            if ($proc.ExitCode -eq 0) {
-                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-                Write-ColorOutput "        Success!" $C_GREEN
-                $installed += "ffmpeg"
-            } else {
-                Write-ColorOutput "        Warning: ffmpeg installation may have issues (Exit code: $($proc.ExitCode))" $C_YELLOW
-            }
-        } catch {
-            Write-ColorOutput "        Warning: $_" $C_YELLOW
-        }
-    } else {
-        Write-ColorOutput "  [2/2] ffmpeg already installed." $C_GREEN
-    }
-    
-    if ($failed.Count -gt 0) {
-        Write-ColorOutput "`n  Failed to install: $($failed -join ', ')" $C_RED
-        return $false
-    }
-    
-    return $true
-}
-
-function Install-YtDlpManual {
-    param([string]$InstallDir = "")
-    
-    if (-not $InstallDir) {
-        $InstallDir = Join-Path $env:USERPROFILE ".media-downloader"
-    }
-    
-    if (-not (Test-Path $InstallDir)) {
-        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    }
-    
-    $ytDlpPath = Join-Path $InstallDir "yt-dlp.exe"
-    
-    Write-ColorOutput "        Downloading yt-dlp directly..." $C_YELLOW
-    
-    $urls = @(
-        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
-        "https://yt-dlp.org/downloads/latest/yt-dlp.exe"
-    )
-    
-    foreach ($url in $urls) {
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $ytDlpPath -UseBasicParsing -TimeoutSec 30
-            if (Test-Path $ytDlpPath) {
-                Write-ColorOutput "        Success! (installed to $InstallDir)" $C_GREEN
-                
-                # Add to PATH
-                $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-                if ($userPath -notlike "*$InstallDir*") {
-                    [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
-                    $env:Path += ";$InstallDir"
-                }
-                return $true
-            }
-        } catch {
-            Write-ColorOutput "        Failed to download from $url" $C_RED
-        }
-    }
-    
-    return $false
-}
-
-function Update-Script {
-    param([string]$InstallDir = "")
-    
-    if (-not $InstallDir) {
-        $InstallDir = Join-Path $env:USERPROFILE ".media-downloader"
-    }
-    
-    $ScriptPath = Join-Path $InstallDir "MediaDownloader.ps1"
-    
-    Write-ColorOutput "  Downloading latest version..." $C_GRAY
-    try {
-        Invoke-WebRequest -Uri $RepoRawUrl -OutFile "$ScriptPath.new" -UseBasicParsing -TimeoutSec 30
-        
-        # Verify the downloaded file
-        $content = Get-Content "$ScriptPath.new" -Raw -ErrorAction Stop
-        if ($content -match 'function Show-WelcomeScreen') {
-            # Backup current version
-            if (Test-Path $ScriptPath) {
-                Copy-Item $ScriptPath "$ScriptPath.backup" -Force
-            }
-            
-            # Replace with new version
-            Move-Item "$ScriptPath.new" $ScriptPath -Force
-            Write-ColorOutput "        Success!" $C_GREEN
-            return $true
-        } else {
-            Remove-Item "$ScriptPath.new" -Force -ErrorAction SilentlyContinue
-            Write-ColorOutput "        Downloaded file appears invalid!" $C_RED
-            return $false
-        }
-    } catch {
-        Write-ColorOutput "        Failed: $_" $C_RED
-        Remove-Item "$ScriptPath.new" -Force -ErrorAction SilentlyContinue
-        return $false
-    }
-}
-
-# Main installation logic
 Write-Host ""
 Write-ColorOutput "Media Downloader v1.0 - Enhanced Installer" $C_CYAN
 Write-ColorOutput "-------------------------------------------" $C_GRAY
@@ -266,76 +64,163 @@ Write-Host ""
 $InstallDir = Join-Path $env:USERPROFILE ".media-downloader"
 $ScriptPath = Join-Path $InstallDir "MediaDownloader.ps1"
 
-# Check if already installed
-$currentVersion = Get-InstalledVersion
-if ($currentVersion) {
-    Write-ColorOutput "Current version installed: v$currentVersion" $C_YELLOW
-    
-    # Check for updates
-    $remoteVersion = Get-RemoteVersion
-    if ($remoteVersion -and $remoteVersion -ne $currentVersion) {
-        Write-ColorOutput "New version available: v$remoteVersion" $C_GREEN
-        $update = Read-Host "Update now? (Y/N)"
-        if ($update -eq 'Y' -or $update -eq 'y') {
-            if (Update-Script -InstallDir $InstallDir) {
-                Write-ColorOutput "`nUpdate successful! Run 'Media' to start." $C_GREEN
-                exit 0
-            }
-        }
+# Step 1: Create installation directory
+Write-ColorOutput "[1/5] Menyiapkan direktori instalasi..." $C_GRAY
+try {
+    if (!(Test-Path $InstallDir)) {
+        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+        Write-ColorOutput "      Direktori dibuat: $InstallDir" $C_GREEN
     } else {
-        Write-ColorOutput "You already have the latest version." $C_GREEN
+        Write-ColorOutput "      Direktori sudah ada: $InstallDir" $C_GREEN
     }
-}
-
-# Create installation directory
-if (!(Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-}
-
-# Download main script
-Write-ColorOutput "[1/4] Downloading MediaDownloader script..." $C_GRAY
-if (Update-Script -InstallDir $InstallDir) {
-    Write-ColorOutput "      Success!" $C_GREEN
-} else {
-    Write-ColorOutput "      Failed to download script!" $C_RED
+} catch {
+    Write-ColorOutput "      GAGAL membuat direktori!" $C_RED
+    Write-ColorOutput "      Error: $_" $C_YELLOW
+    Pause
     exit 1
 }
 
-# Install dependencies
-Write-ColorOutput "[2/4] Checking dependencies..." $C_GRAY
-if (-not (Install-Dependencies)) {
-    Write-ColorOutput "      Some dependencies may be missing. The app may not work correctly." $C_YELLOW
+# Step 2: Download main script
+Write-ColorOutput "[2/5] Mengunduh MediaDownloader.ps1..." $C_GRAY
+try {
+    $ProgressPreference = 'SilentlyContinue'  # Disable progress bar for faster download
+    Invoke-WebRequest -Uri $RepoRawUrl -OutFile $ScriptPath -UseBasicParsing -TimeoutSec 30
+    Write-ColorOutput "      Berhasil diunduh!" $C_GREEN
+} catch {
+    Write-ColorOutput "      GAGAL mengunduh script!" $C_RED
+    Write-ColorOutput "      Error: $_" $C_YELLOW
+    Write-ColorOutput "      Pastikan koneksi internet tersedia." $C_YELLOW
+    Pause
+    exit 1
 }
 
-# Configure PATH
-Write-ColorOutput "[3/4] Configuring PATH..." $C_GRAY
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$InstallDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
-    $env:Path += ";$InstallDir"
-    Write-ColorOutput "      Success!" $C_GREEN
+# Step 3: Check and install yt-dlp
+Write-ColorOutput "[3/5] Mengecek yt-dlp..." $C_GRAY
+
+$ytDlpInstalled = $false
+$ytDlpPath = $null
+
+# Check if yt-dlp already exists
+if (Test-CommandExists -Command "yt-dlp") {
+    $ytDlpInstalled = $true
+    $ytDlpPath = (Get-Command yt-dlp).Source
+    Write-ColorOutput "      yt-dlp sudah terinstall: $ytDlpPath" $C_GREEN
 } else {
-    Write-ColorOutput "      Already configured." $C_GREEN
+    Write-ColorOutput "      yt-dlp belum terinstall. Mencoba install..." $C_YELLOW
+    
+    # Try winget first
+    $wingetExists = Test-CommandExists -Command "winget"
+    
+    if ($wingetExists) {
+        Write-ColorOutput "      Menginstall yt-dlp via winget..." $C_GRAY
+        try {
+            # Run winget and wait for completion
+            $proc = Start-Process -FilePath "winget" -ArgumentList "install yt-dlp --silent --accept-package-agreements --accept-source-agreements" -NoNewWindow -PassThru -Wait
+            
+            # Refresh PATH
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            
+            # Check if installation succeeded
+            Start-Sleep -Seconds 2  # Give time for PATH to update
+            
+            if (Test-CommandExists -Command "yt-dlp") {
+                $ytDlpInstalled = $true
+                $ytDlpPath = (Get-Command yt-dlp).Source
+                Write-ColorOutput "      yt-dlp berhasil diinstall: $ytDlpPath" $C_GREEN
+            } else {
+                Write-ColorOutput "      winget install selesai tapi yt-dlp tidak ditemukan di PATH" $C_YELLOW
+            }
+        } catch {
+            Write-ColorOutput "      Gagal install via winget: $_" $C_YELLOW
+        }
+    } else {
+        Write-ColorOutput "      winget tidak ditemukan. Mencoba download manual..." $C_YELLOW
+    }
+    
+    # If winget failed or doesn't exist, try manual download
+    if (-not $ytDlpInstalled) {
+        Write-ColorOutput "      Mengunduh yt-dlp.exe secara manual..." $C_GRAY
+        
+        $ytDlpLocalPath = Join-Path $InstallDir "yt-dlp.exe"
+        
+        $downloadUrls = @(
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
+            "https://yt-dlp.org/downloads/latest/yt-dlp.exe"
+        )
+        
+        foreach ($url in $downloadUrls) {
+            try {
+                Write-ColorOutput "      Mencoba: $url" $C_GRAY
+                Invoke-WebRequest -Uri $url -OutFile $ytDlpLocalPath -UseBasicParsing -TimeoutSec 30
+                
+                if (Test-Path $ytDlpLocalPath) {
+                    $fileSize = (Get-Item $ytDlpLocalPath).Length
+                    if ($fileSize -gt 1MB) {  # Valid executable should be > 1MB
+                        $ytDlpInstalled = $true
+                        $ytDlpPath = $ytDlpLocalPath
+                        Write-ColorOutput "      yt-dlp berhasil diunduh: $ytDlpPath" $C_GREEN
+                        
+                        # Add to PATH
+                        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+                        if ($userPath -notlike "*$InstallDir*") {
+                            [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
+                            $env:Path += ";$InstallDir"
+                            Write-ColorOutput "      PATH diperbarui" $C_GREEN
+                        }
+                        break
+                    } else {
+                        Remove-Item $ytDlpLocalPath -Force -ErrorAction SilentlyContinue
+                        Write-ColorOutput "      File yang diunduh terlalu kecil (kemungkinan error page)" $C_YELLOW
+                    }
+                }
+            } catch {
+                Write-ColorOutput "      Gagal unduh dari $url : $_" $C_YELLOW
+            }
+        }
+    }
 }
 
-# Configure PowerShell profile
-Write-ColorOutput "[4/4] Configuring PowerShell profile..." $C_GRAY
-
-if (!(Test-Path $PROFILE)) {
-    New-Item -ItemType File -Force -Path $PROFILE | Out-Null
+if (-not $ytDlpInstalled) {
+    Write-ColorOutput "      PERINGATAN: yt-dlp belum terinstall!" $C_YELLOW
+    Write-ColorOutput "      Aplikasi mungkin tidak akan berfungsi." $C_YELLOW
+    Write-ColorOutput "      Install manual: winget install yt-dlp" $C_YELLOW
 }
 
-# Remove old configurations
-$old = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
-if ($old) {
-    $old = $old -replace '(?s)# ==== MEDIA DOWNLOADER START ====.*?# ==== MEDIA DOWNLOADER END ====', ''
-    $old = $old -replace '(?s)# ==== MediaDownloader START ====.*?# ==== MediaDownloader END ====', ''
-    $old = $old -replace '(?s)# ==== Media Downloader START ====.*?# ==== Media Downloader END ====', ''
-    Set-Content -Path $PROFILE -Value $old.TrimEnd() -Force
+# Step 4: Configure PATH
+Write-ColorOutput "[4/5] Mengonfigurasi PATH..." $C_GRAY
+try {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($userPath -notlike "*$InstallDir*") {
+        [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
+        $env:Path += ";$InstallDir"
+        Write-ColorOutput "      PATH diperbarui untuk user" $C_GREEN
+    } else {
+        Write-ColorOutput "      PATH sudah dikonfigurasi" $C_GREEN
+    }
+} catch {
+    Write-ColorOutput "      Gagal mengonfigurasi PATH: $_" $C_YELLOW
 }
 
-# Add new configuration with enhanced commands
-$block = @"
+# Step 5: Configure PowerShell profile
+Write-ColorOutput "[5/5] Mengonfigurasi PowerShell profile..." $C_GRAY
+
+try {
+    if (!(Test-Path $PROFILE)) {
+        New-Item -ItemType File -Force -Path $PROFILE | Out-Null
+        Write-ColorOutput "      Profile dibuat: $PROFILE" $C_GREEN
+    }
+    
+    # Remove old configurations
+    $old = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
+    if ($old) {
+        $old = $old -replace '(?s)# ==== MEDIA DOWNLOADER START ====.*?# ==== MEDIA DOWNLOADER END ====', ''
+        $old = $old -replace '(?s)# ==== MediaDownloader START ====.*?# ==== MediaDownloader END ====', ''
+        $old = $old -replace '(?s)# ==== Media Downloader START ====.*?# ==== Media Downloader END ====', ''
+        Set-Content -Path $PROFILE -Value $old.TrimEnd() -Force
+    }
+    
+    # Add new configuration
+    $block = @"
 
 # ==== MEDIA DOWNLOADER START ====
 if (Test-Path "$env:USERPROFILE\.media-downloader") {
@@ -348,17 +233,23 @@ if (Test-Path "$env:USERPROFILE\.media-downloader") {
         
         switch (`$Command.ToLower()) {
             "update" {
-                & `$PSCommandPath
                 irm https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1 | iex
                 return
             }
             "doctor" {
-                Write-Host "Running diagnostics..." -ForegroundColor Cyan
+                Write-Host "Media Downloader - Diagnostics" -ForegroundColor Cyan
+                Write-Host "=============================" -ForegroundColor Gray
                 Write-Host ""
                 
                 # Check script
                 if (Test-Path `$scriptPath) {
                     Write-Host "[OK] MediaDownloader.ps1 found" -ForegroundColor Green
+                    try {
+                        `$content = Get-Content `$scriptPath -Raw
+                        if (`$content -match '\$script:AppVersion\s*=\s*[''"](\d+\.\d+)[''"]') {
+                            Write-Host "      Version: v`$(`$matches[1])" -ForegroundColor Gray
+                        }
+                    } catch {}
                 } else {
                     Write-Host "[FAIL] MediaDownloader.ps1 not found" -ForegroundColor Red
                 }
@@ -369,7 +260,7 @@ if (Test-Path "$env:USERPROFILE\.media-downloader") {
                     Write-Host "[OK] yt-dlp found: `$(`$ytDlp.Source)" -ForegroundColor Green
                     try {
                         `$version = & yt-dlp --version 2>`$null
-                        Write-Host "      Version: `$version" -ForegroundColor Gray
+                        Write-Host "       Version: `$version" -ForegroundColor Gray
                     } catch {}
                 } else {
                     Write-Host "[FAIL] yt-dlp not found in PATH" -ForegroundColor Red
@@ -392,7 +283,7 @@ if (Test-Path "$env:USERPROFILE\.media-downloader") {
                 }
                 
                 Write-Host ""
-                return
+                break
             }
             "config" {
                 `$settingsPath = "$env:USERPROFILE\.media-downloader\settings.json"
@@ -462,113 +353,52 @@ if (Test-Path "$env:USERPROFILE\.media-downloader") {
 # ==== MEDIA DOWNLOADER END ====
 "@
 
-Add-Content -Path $PROFILE -Value $block -Force
-Write-ColorOutput "      Success!" $C_GREEN
+    Add-Content -Path $PROFILE -Value $block -Force
+    Write-ColorOutput "      Profile dikonfigurasi: $PROFILE" $C_GREEN
+    
+} catch {
+    Write-ColorOutput "      Gagal mengonfigurasi profile: $_" $C_RED
+    Pause
+    exit 1
+}
 
-# Add functions to current session
+# Add functions to current session (so user can use immediately)
+Write-ColorOutput "Mengaktifkan fungsi untuk session ini..." $C_GRAY
+
+# Create the Media function in current session
+Invoke-Expression @"
 function Global:Media {
-    param([string]$Command = "")
+    param([string]`$Command = "")
     
-    $scriptPath = "$env:USERPROFILE\.media-downloader\MediaDownloader.ps1"
+    `$scriptPath = "$env:USERPROFILE\.media-downloader\MediaDownloader.ps1"
     
-    switch ($Command.ToLower()) {
-        "update" {
-            irm https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1 | iex
-            return
-        }
-        "doctor" {
-            Write-Host "Running diagnostics..." -ForegroundColor Cyan
-            Write-Host ""
-            
-            if (Test-Path $scriptPath) {
-                Write-Host "[OK] MediaDownloader.ps1 found" -ForegroundColor Green
-            } else {
-                Write-Host "[FAIL] MediaDownloader.ps1 not found" -ForegroundColor Red
-            }
-            
-            $ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
-            if ($ytDlp) {
-                Write-Host "[OK] yt-dlp found: $($ytDlp.Source)" -ForegroundColor Green
-                try {
-                    $version = & yt-dlp --version 2>$null
-                    Write-Host "      Version: $version" -ForegroundColor Gray
-                } catch {}
-            } else {
-                Write-Host "[FAIL] yt-dlp not found in PATH" -ForegroundColor Red
-            }
-            
-            $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
-            if ($ffmpeg) {
-                Write-Host "[OK] ffmpeg found: $($ffmpeg.Source)" -ForegroundColor Green
-            } else {
-                Write-Host "[FAIL] ffmpeg not found in PATH" -ForegroundColor Red
-            }
-            
-            $settingsPath = "$env:USERPROFILE\.media-downloader\settings.json"
-            if (Test-Path $settingsPath) {
-                Write-Host "[OK] Settings file found" -ForegroundColor Green
-            } else {
-                Write-Host "[INFO] Settings file not found (will be created on first run)" -ForegroundColor Yellow
-            }
-            
-            Write-Host ""
-            return
-        }
-        "config" {
-            $settingsPath = "$env:USERPROFILE\.media-downloader\settings.json"
-            if (Test-Path $settingsPath) {
-                notepad.exe $settingsPath
-            } else {
-                Write-Host "Settings file not found. Run Media first to create it." -ForegroundColor Yellow
-            }
-            return
-        }
-        "cache" {
-            Write-Host "Clearing cache..." -ForegroundColor Cyan
-            $cacheDir = "$env:USERPROFILE\.media-downloader\cache"
-            if (Test-Path $cacheDir) {
-                Remove-Item $cacheDir -Recurse -Force
-                Write-Host "[OK] Cache cleared" -ForegroundColor Green
-            } else {
-                Write-Host "[INFO] No cache to clear" -ForegroundColor Yellow
-            }
-            
-            try {
-                & yt-dlp --rm-cache-dir 2>$null
-                Write-Host "[OK] yt-dlp cache cleared" -ForegroundColor Green
-            } catch {}
-            
-            return
-        }
-        "self-update" {
-            Write-Host "Checking for updates..." -ForegroundColor Cyan
-            $installerUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1"
-            try {
-                $tempFile = [System.IO.Path]::GetTempFileName() + ".ps1"
-                Invoke-WebRequest -Uri $installerUrl -OutFile $tempFile -UseBasicParsing
-                & powershell -NoLogo -ExecutionPolicy Bypass -File $tempFile
-                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-            } catch {
-                Write-Host "Failed to self-update: $_" -ForegroundColor Red
-            }
-            return
-        }
+    if (`$Command -eq "doctor") {
+        Write-Host "Media Downloader - Quick Diagnostics" -ForegroundColor Cyan
+        Write-Host ""
+        if (Test-Path `$scriptPath) { Write-Host "[OK] Script found" -ForegroundColor Green } else { Write-Host "[FAIL] Script not found" -ForegroundColor Red }
+        `$ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
+        if (`$ytDlp) { Write-Host "[OK] yt-dlp found" -ForegroundColor Green } else { Write-Host "[FAIL] yt-dlp not found" -ForegroundColor Red }
+        return
     }
     
-    & powershell -NoLogo -ExecutionPolicy Bypass -File $scriptPath @args
+    if (Test-Path `$scriptPath) {
+        & powershell -NoLogo -ExecutionPolicy Bypass -File `$scriptPath @args
+    } else {
+        Write-Host "MediaDownloader.ps1 not found!" -ForegroundColor Red
+    }
 }
 
 function Global:Remove-Media {
-    $dir = "$env:USERPROFILE\.media-downloader"
-    $c = Read-Host 'Uninstall Media Downloader? (Y/N)'
-    if ($c -ne 'Y' -and $c -ne 'y') { return }
+    `$dir = "$env:USERPROFILE\.media-downloader"
+    `$c = Read-Host 'Uninstall Media Downloader? (Y/N)'
+    if (`$c -ne 'Y' -and `$c -ne 'y') { return }
 
-    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path `$dir) { Remove-Item `$dir -Recurse -Force -ErrorAction SilentlyContinue }
       
-    $p = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if ($p) {
-        $parts = $p -split ';' | Where-Object { $_ -and ($_ -notlike '*.media-downloader*') }
-        [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
+    `$p = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (`$p) {
+        `$parts = `$p -split ';' | Where-Object { `$_ -and (`$_ -notlike '*.media-downloader*') }
+        [Environment]::SetEnvironmentVariable('Path', (`$parts -join ';'), 'User')
     }
 
     Remove-Item Function:\Media -ErrorAction SilentlyContinue
@@ -577,21 +407,29 @@ function Global:Remove-Media {
     Write-Host 'Uninstalled successfully.' -ForegroundColor Green
     Write-Host 'Restart PowerShell to complete.' -ForegroundColor Gray
 }
+"@
 
 Write-Host ""
-Write-ColorOutput "Installation complete!" $C_GREEN
-Write-Host ""
-Write-ColorOutput "Commands:" $C_WHITE
-Write-ColorOutput "  Media             - Run application" $C_CYAN
-Write-ColorOutput "  Media update      - Check and apply updates" $C_CYAN
-Write-ColorOutput "  Media doctor      - Diagnose installation issues" $C_CYAN
-Write-ColorOutput "  Media config      - Open settings file" $C_CYAN
-Write-ColorOutput "  Media cache clear - Clear cached data" $C_CYAN
-Write-ColorOutput "  Media self-update- Self-update from GitHub" $C_CYAN
-Write-ColorOutput "  Remove-Media      - Uninstall" $C_CYAN
+Write-ColorOutput "==========================================" $C_GREEN
+Write-ColorOutput "Instalasi selesai!" $C_GREEN
+Write-ColorOutput "==========================================" $C_GREEN
 Write-Host ""
 
-# Run doctor to verify installation
-Write-ColorOutput "Running post-installation check..." $C_YELLOW
+Write-ColorOutput "Commands yang tersedia:" $C_CYAN
+Write-Host "  Media             - Jalankan aplikasi"
+Write-Host "  Media update      - Cek dan apply update"
+Write-Host "  Media doctor      - Diagnosa masalah instalasi"
+Write-Host "  Media config      - Buka file settings"
+Write-Host "  Media cache clear - Bersihkan cache"
+Write-Host "  Media self-update- Update manual dari GitHub"
+Write-Host "  Remove-Media      - Uninstall"
 Write-Host ""
-& Media doctor
+
+Write-ColorOutput "PENTING:" $C_YELLOW
+Write-ColorOutput "1. Tutup dan buka kembali PowerShell Anda" $C_YELLOW
+Write-ColorOutput "2. Atau jalankan: . `$PROFILE" $C_YELLOW
+Write-Host ""
+Write-ColorOutput "Test instalasi dengan menjalankan: Media doctor" $C_CYAN
+Write-Host ""
+
+Pause
