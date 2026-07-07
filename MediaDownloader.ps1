@@ -1939,30 +1939,49 @@ function Test-Dependencies {
     Write-Center -Row ($centerRow - 2) -Text "$FG_CYAN${BOLD}Menyiapkan Media Downloader...$RESET"
     Write-Center -Row $centerRow -Text "$FG_GRAY Menginstall yt-dlp + ffmpeg via winget...$RESET"
 
-    # Jalankan winget dengan WindowStyle Hidden agar output teks tidak mengacak-acak layar
+    # Jalankan winget di background dengan output di-redirect ke NUL
+    # supaya tidak ada teks yg menembus UI kita.
+    $nullFile = Join-Path $env:TEMP "media-winget.log"
     $proc = Start-Process -FilePath "winget" `
-        -ArgumentList "install yt-dlp --silent --accept-package-agreements --accept-source-agreements" `
-        -WindowStyle Hidden -PassThru
+        -ArgumentList "install yt-dlp --silent --accept-package-agreements --accept-source-agreements --disable-interactivity" `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $nullFile `
+        -RedirectStandardError "$nullFile.err" `
+        -PassThru
 
+    $barWidth = [Math]::Min(46, [Math]::Max(18, (Get-TermWidth) - 24))
+    $barCol = [Math]::Max(0, [Math]::Floor((Get-TermWidth) / 2) - [Math]::Floor(($barWidth + 8) / 2))
     $i = 0
     while (-not $proc.HasExited) {
         $spin = $script:SpinChars[$i % 10]
-        # Clear row before writing spinner to prevent overlap
-        Write-Line -Row ($centerRow + 2) -Text "$FG_CYAN$spin$RESET  ${FG_WHITE}Mohon tunggu sebentar...$RESET"
-        Start-Sleep -Milliseconds 150
+        $pos = $i % $barWidth
+        $barSb = New-Object System.Text.StringBuilder
+        for ($b = 0; $b -lt $barWidth; $b++) {
+            if ([Math]::Abs($b - $pos) -le 3) { [void]$barSb.Append("$FG_BLUE$GL_FULL") }
+            else { [void]$barSb.Append("$FG_DIM$GL_LIGHT") }
+        }
+
+        Out-Ansi ((Ansi-Pos ($centerRow + 2) 0) + "$ESC[2K" + (Ansi-Pos ($centerRow + 2) $barCol) + $barSb.ToString() + $RESET + "  $FG_CYAN$spin$RESET")
+        Write-Center -Row ($centerRow + 4) -Text "$FG_GRAY Downloading package via winget...$RESET"
+        Start-Sleep -Milliseconds 120
         $i++
     }
+
+    # Bersihkan file log sementara
+    Remove-Item $nullFile -ErrorAction SilentlyContinue
+    Remove-Item "$nullFile.err" -ErrorAction SilentlyContinue
 
     # Refresh PATH environment variable agar yt-dlp langsung terbaca tanpa restart
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
     if (Get-Command yt-dlp -ErrorAction SilentlyContinue) {
-        Write-Center -Row ($centerRow + 2) -Text "$FG_GREEN$GL_CHECK  Instalasi selesai. Memulai aplikasi...$RESET"
+        Out-Ansi ((Ansi-Pos ($centerRow + 2) 0) + "$ESC[2K" + (Ansi-Pos ($centerRow + 2) $barCol) + $FG_BLUE + ($GL_FULL * $barWidth) + $RESET + "  $FG_WHITE${BOLD}100%$RESET")
+        Write-Center -Row ($centerRow + 4) -Text "$FG_GREEN$GL_CHECK  Instalasi selesai. Memulai aplikasi...$RESET"
         Start-Sleep -Milliseconds 800
         return $true
     } else {
-        Write-Center -Row ($centerRow + 2) -Text "$FG_RED$GL_CROSS  Gagal install otomatis.$RESET"
-        Write-Center -Row ($centerRow + 3) -Text "$FG_DIM Install manual: winget install yt-dlp$RESET"
+        Write-Center -Row ($centerRow + 4) -Text "$FG_RED$GL_CROSS  Gagal install otomatis.$RESET"
+        Write-Center -Row ($centerRow + 5) -Text "$FG_DIM Install manual: winget install yt-dlp$RESET"
         [void][Console]::ReadKey($true)
         return $false
     }
