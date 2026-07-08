@@ -12,7 +12,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$DownloadUrl = "https://github.com/Danishtzy24/media-downloader-cli/releases/download/media/MediaDownloader.ps1"
+$DownloadUrl = "https://github.com/Danishtzy24/media-downloader-cli/releases/latest/download/MediaDownloader.ps1"
 
 $ESC = [char]27
 $C_CYAN  = "$ESC[38;2;120;220;220m"
@@ -35,7 +35,7 @@ if (!(Test-Path $InstallDir)) {
 
 Write-Host "$C_GRAY [1/3] Downloading...$R"
 try {
-    Invoke-WebRequest -Uri $RepoRawUrl -OutFile $ScriptPath -UseBasicParsing
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $ScriptPath -UseBasicParsing
     Write-Host "$C_GREEN       Success.$R"
 } catch {
     Write-Host "$C_RED       Failed: $($_.Exception.Message)$R"
