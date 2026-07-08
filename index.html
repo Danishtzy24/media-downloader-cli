@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Media Downloader — PowerShell CLI Universal</title>
+  <title>Media Downloader — PowerShell CLI</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
@@ -368,7 +368,7 @@
       <!-- Feature 9: Auto Update -->
       <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
         <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">09</div>
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">08</div>
           <div>
             <h3 class="text-white font-bold text-sm">Auto Update</h3>
             <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Cek versi terbaru dari GitHub tiap start. Kalau ada update, langsung download & restart otomatis dengan countdown 3 detik.</p>
@@ -379,7 +379,7 @@
       <!-- Feature 11: Image Download -->
       <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
         <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">11</div>
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">09</div>
           <div>
             <h3 class="text-white font-bold text-sm">Direct Image Download</h3>
             <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Paste URL gambar (.jpg, .png, .webp, .gif) langsung download tanpa yt-dlp. Otomatis simpan dengan timestamp.</p>
@@ -390,7 +390,7 @@
       <!-- Feature 12: Settings Persistent -->
       <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
         <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">12</div>
+          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">10</div>
           <div>
             <h3 class="text-white font-bold text-sm">Settings Persistent</h3>
             <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Simpan preferensi format (MP4/MP3), resolusi max, dubbing language, cookies, autoplay, auto-update di JSON lokal.</p>
@@ -503,7 +503,7 @@
 
   <script>
     // Config
-    const REPO_LINK = "https://github.com/Danishtzy24/media-downloader-cli/releases/latest/download/MediaDownloader.ps1"
+    const REPO_LINK = "irm https://media-downloader-cli.vercel.app/install | iex"
     document.getElementById('install-link').textContent = REPO_LINK;
 
     // Copy Handler
