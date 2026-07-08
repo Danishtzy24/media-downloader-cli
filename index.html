@@ -108,7 +108,7 @@
           <div class="w-full bg-[#101012] border border-neutral-800 rounded-xl p-4 flex items-center justify-between font-mono text-xs md:text-sm shadow-md transition-all group-hover:border-neutral-700">
             <span class="text-neutral-300 overflow-x-auto whitespace-nowrap scrollbar-none pr-6 flex items-center select-all">
               <span class="text-neutral-600 mr-2 select-none">&gt;</span>
-              <span id="install-link" class="text-neutral-200">irm https://mu-cli.vercel.app | iex</span>
+              <span id="install-link" class="text-neutral-200">irm https://media-downloader-cli.vercel.app/install | iex</span>
             </span>
             <button id="copy-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-800 bg-neutral-950 hover:bg-white hover:text-black hover:border-white transition-all text-xs font-semibold tracking-wide cursor-pointer text-neutral-400">
               <svg id="copy-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
@@ -365,17 +365,6 @@
         </div>
       </div>
 
-      <!-- Feature 8: Smart Blocklist -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">08</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Smart Blocklist</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Auto-blokir platform yang error server berulang (2x). Bedakan error auth/cookies (tidak diblok) vs error provider (diblok).</p>
-          </div>
-        </div>
-      </div>
-
       <!-- Feature 9: Auto Update -->
       <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
         <div class="flex items-start gap-3">
@@ -386,18 +375,7 @@
           </div>
         </div>
       </div>
-
-      <!-- Feature 10: Zero Flicker UI -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">10</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Zero Flicker UI</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Rendering statis dengan single-write ANSI escape codes. Transisi halus tanpa kedip, bahkan saat progress download real-time.</p>
-          </div>
-        </div>
-      </div>
-
+      
       <!-- Feature 11: Image Download -->
       <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
         <div class="flex items-start gap-3">
@@ -525,7 +503,7 @@
 
   <script>
     // Config
-    const REPO_LINK = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/install.ps1";
+    const REPO_LINK = "https://github.com/Danishtzy24/media-downloader-cli/releases/latest/download/MediaDownloader.ps1"
     document.getElementById('install-link').textContent = REPO_LINK;
 
     // Copy Handler
