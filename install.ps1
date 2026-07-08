@@ -12,7 +12,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$RepoRawUrl = "https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/MediaDownloader.ps1"
+$DownloadUrl = "https://github.com/Danishtzy24/media-downloader-cli/releases/download/media/MediaDownloader.ps1"
 
 $ESC = [char]27
 $C_CYAN  = "$ESC[38;2;120;220;220m"
