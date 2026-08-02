@@ -31,7 +31,6 @@ try { [Console]::CursorVisible = $false } catch {}
 # ============================================
 # LOGGING SYSTEM
 # ============================================
-
 $script:LogDir    = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.media-downloader\logs'
 $script:LogPath   = Join-Path $script:LogDir "$((Get-Date -Format 'yyyy-MM-dd')).log"
 
@@ -50,9 +49,7 @@ function Write-Log {
         if (Test-Path $script:LogDir) {
             Add-Content -Path $script:LogPath -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
         }
-    } catch {
-        # Jangan pernah crash karena logging gagal
-    }
+    } catch {}
 }
 
 Write-Log -Message "Media Downloader v$script:AppVersion started" -Level INFO
@@ -60,11 +57,9 @@ Write-Log -Message "Media Downloader v$script:AppVersion started" -Level INFO
 # ============================================
 # ANSI & GLYPHS
 # ============================================
-
 $ESC   = [char]27
 $RESET = "$ESC[0m"
 $BOLD  = "$ESC[1m"
-
 $FG_WHITE  = "$ESC[38;2;235;235;235m"
 $FG_GRAY   = "$ESC[38;2;140;140;140m"
 $FG_DIM    = "$ESC[38;2;90;90;90m"
@@ -93,7 +88,6 @@ $script:SpinChars = @([char]0x280B,[char]0x2819,[char]0x2839,[char]0x2838,[char]
 # ============================================
 # GLOBALS & SETTINGS
 # ============================================
-
 $script:VideoInfo    = $null
 $script:Resolutions  = @()
 $script:AudioTracks  = @()
@@ -176,7 +170,6 @@ function Is-FullFeaturePlatform {
     return ($Url -match 'youtube\.com|youtu\.be') -and ($Url -notmatch 'music\.youtube\.com')
 }
 
-# YouTube Music = audio only
 function Is-YouTubeMusicUrl {
     param([string]$Url)
     return ($Url -match 'music\.youtube\.com')
@@ -212,7 +205,6 @@ function Get-InstalledMediaPlayers {
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths'
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths'
     )
-
     foreach ($p in $script:KnownPlayers) {
         foreach ($root in $appPathsRoots) {
             $fullRegPath = Join-Path $root $p.Exe
@@ -235,7 +227,6 @@ function Get-InstalledMediaPlayers {
 
 function Get-WindowsDefaultMediaPlayer {
     param([string]$Extension = '.mp4')
-
     try {
         $userChoicePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Extension\UserChoice"
         if (Test-Path $userChoicePath) {
@@ -255,7 +246,6 @@ function Get-WindowsDefaultMediaPlayer {
             }
         }
     } catch {}
-
     $wmp = "$env:ProgramFiles\Windows Media Player\wmplayer.exe"
     if (Test-Path $wmp) { return $wmp }
     return $null
@@ -263,11 +253,9 @@ function Get-WindowsDefaultMediaPlayer {
 
 function Invoke-AutoplayMedia {
     param([string]$FilePath)
-
     if (-not $FilePath -or -not (Test-Path $FilePath)) { return }
     $choice = [string]$script:Settings.AutoplayPlayer
     if (-not $choice -or $choice -eq 'off') { return }
-
     try {
         if ($choice -eq 'default') {
             $ext = [System.IO.Path]::GetExtension($FilePath)
@@ -343,10 +331,8 @@ function Get-BlockReason {
 
 function Record-PlatformFail {
     param([string]$Platform, [string]$Reason = '', [string]$ErrorText = '')
-
     $errType = Classify-Error -ErrorText $ErrorText
     if ($errType -eq 'auth' -or $errType -eq 'network') { return }
-
     if (-not $script:Blocklist.ContainsKey($Platform)) {
         $script:Blocklist[$Platform] = @{ Blocked = $false; Reason = ''; FailCount = 0 }
     }
@@ -354,7 +340,7 @@ function Record-PlatformFail {
     if ($script:Blocklist[$Platform].FailCount -ge $script:FailThreshold) {
         $script:Blocklist[$Platform].Blocked = $true
         if ($Reason) { $script:Blocklist[$Platform].Reason = $Reason }
-        else { $script:Blocklist[$Platform].Reason = "Gagal $($script:Blocklist[$Platform].FailCount)x berturut-turut" }
+        else { $script:Blocklist[$Platform].Reason = "Gagal $($script:Blocklist[$Platform].FailCount)x berturut-turun" }
     }
     Save-Blocklist
 }
@@ -383,7 +369,6 @@ $script:SaveDir = $defaultDir
 
 # --- Settings (persisten) ---
 $script:SettingsPath = Join-Path $script:ConfigDir 'settings.json'
-
 $script:Settings = [PSCustomObject]@{
     AudioLang      = 'original'
     MaxRes         = 0
@@ -469,6 +454,7 @@ $script:AudioLangOptions = @(
     @{ Code = 'hi';       Label = 'Hindi' }
     @{ Code = 'pt';       Label = 'Portuguese' }
 )
+
 $script:ResOptions = @(0, 2160, 1440, 1080, 720, 480, 360)
 
 function Get-AudioLangLabel {
@@ -486,46 +472,37 @@ function Get-ResLabel {
 # ============================================
 # UI HELPERS
 # ============================================
-
 function Get-TermWidth  { return [Console]::WindowWidth }
 function Get-TermHeight { return [Console]::WindowHeight }
-
 function Out-Ansi { param([string]$S) [Console]::Write($S) }
-
 function Clear-Screen {
     try { [Console]::Clear() } catch {}
     Out-Ansi "$ESC[H"
 }
-
 function Ansi-Pos {
     param([int]$Row, [int]$Col)
     $r = [Math]::Min([Math]::Max(0, $Row), (Get-TermHeight) - 1) + 1
     $c = [Math]::Min([Math]::Max(0, $Col), (Get-TermWidth) - 1) + 1
     return "$ESC[$r;${c}H"
 }
-
 function Write-At {
     param([int]$Row, [int]$Col, [string]$Text)
     Out-Ansi ((Ansi-Pos $Row $Col) + $Text)
 }
-
 function Write-Line {
     param([int]$Row, [string]$Text = '', [int]$Col = 0)
     Out-Ansi ((Ansi-Pos $Row 0) + "$ESC[2K" + (Ansi-Pos $Row $Col) + $Text)
 }
-
 function Get-VisibleLength {
     param([string]$Text)
     return ($Text -replace "$ESC\[[0-9;]*m", '').Length
 }
-
 function Write-Center {
     param([int]$Row, [string]$Text, [int]$VisibleLen = -1)
     $len = if ($VisibleLen -ge 0) { $VisibleLen } else { Get-VisibleLength $Text }
     $col = [Math]::Max(0, [Math]::Floor((Get-TermWidth) / 2) - [Math]::Floor($len / 2))
     Write-Line -Row $Row -Text $Text -Col $col
 }
-
 function Limit-Text {
     param([string]$Text, [int]$Max)
     if ($null -eq $Text -or $Max -le 0) { return '' }
@@ -533,7 +510,6 @@ function Limit-Text {
     if ($Max -le 3) { return $Text.Substring(0, $Max) }
     return $Text.Substring(0, $Max - 3) + '...'
 }
-
 function Get-PanelMetrics {
     param([int]$MaxWidth = 74)
     $tw = Get-TermWidth
@@ -541,7 +517,6 @@ function Get-PanelMetrics {
     $c = [Math]::Max(0, [Math]::Floor($tw / 2) - [Math]::Floor($w / 2))
     return [PSCustomObject]@{ Width = $w; Col = $c; Inner = [Math]::Max(8, $w - 4) }
 }
-
 function Write-PanelLine {
     param([int]$Row, [int]$Col, [int]$Width, [string]$Text, [string]$Accent = $FG_BLUE)
     $inner = [Math]::Max(1, $Width - 4)
@@ -554,7 +529,6 @@ function Write-PanelLine {
     $pad = [Math]::Max(0, $inner - $vis)
     Write-Line -Row $Row -Text "$Accent$GL_BAR$RESET  $Text$(' ' * $pad)" -Col $Col
 }
-
 function Draw-Footer {
     param([string]$Info = '~')
     $row = (Get-TermHeight) - 1
@@ -565,20 +539,22 @@ function Draw-Footer {
 # ============================================
 # LOGO
 # ============================================
-
 $rawLogo = @(
-    '##)   ##)########)#####)  ##)   ###)  ',
-    '###) ###|##(=====J##( =##)##|  ##( ##)',
-    '##|#####|######(  ##|  ##|##| ##|   ##)',
-    '##| L=##|##(===J  ##|  ##|##| #########)',
-    '##|   ##|########)#####(=J##| ##|     ##)',
+    '##)   ##)########)#####)  ##)   ###)  '
+    '###) ###|##(=====J##( =##)##|  ##( ##)'
+    '##|#####|######(  ##|  ##|##| ##|   ##)'
+    '##| L=##|##(===J  ##|  ##|##| #########)'
+    '##|   ##|########)#####(=J##| ##|     ##)'
     'L=J   L=JL=======JL=====J L=J L=J     L=J'
 )
+
 $cFULL = [string][char]0x2588; $cTL = [string][char]0x2554; $cTR = [string][char]0x2557
 $cBL = [string][char]0x255A; $cBR = [string][char]0x255D; $cH = [string][char]0x2550; $cV = [string][char]0x2551
+
 $script:LogoLines = foreach ($line in $rawLogo) {
     $line.Replace('#', $cFULL).Replace('(', $cTL).Replace(')', $cTR).Replace('L', $cBL).Replace('J', $cBR).Replace('=', $cH).Replace('|', $cV)
 }
+
 $script:LogoWidth = ($script:LogoLines | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
 
 function Draw-Logo {
@@ -592,7 +568,6 @@ function Draw-Logo {
 # ============================================
 # LANG MAP
 # ============================================
-
 $script:LangMap = @{
     'id'='Indonesia'; 'en'='English'; 'en-US'='English'; 'en-GB'='English';
     'ja'='Japanese'; 'ko'='Korean'; 'zh'='Chinese'; 'zh-Hans'='Chinese'; 'zh-Hant'='Chinese (Trad)';
@@ -613,7 +588,6 @@ function Get-LangLabel {
 # ============================================
 # PARSE FORMATS
 # ============================================
-
 function Parse-Formats {
     param($Info)
     $script:Resolutions = @(); $script:AudioTracks = @(); $script:SubtitleList = @()
@@ -660,14 +634,17 @@ function Parse-Formats {
         if ($f.format_note -match 'original' -and $label -ne 'Original') { $label = "$label (Ori)" }
         $script:AudioTracks += [PSCustomObject]@{ Label = $label; FormatID = [string]$f.format_id; Lang = $k }
     }
+
     if ($script:AudioTracks.Count -eq 0) {
         $script:AudioTracks += [PSCustomObject]@{ Label = 'Original'; FormatID = $null; Lang = 'default' }
     }
 
     $script:SubtitleList = @([PSCustomObject]@{ Label = 'Tidak'; Lang = $null })
     $subSource = $null
+
     if ($Info.subtitles -and ($Info.subtitles.PSObject.Properties | Measure-Object).Count -gt 0) { $subSource = $Info.subtitles }
     elseif ($Info.automatic_captions) { $subSource = $Info.automatic_captions }
+
     if ($subSource) {
         $langs = @($subSource.PSObject.Properties | Select-Object -ExpandProperty Name)
         $preferred = @('id','en','ar','ja','ko','zh-Hans','zh','es','fr','de','ru','hi','pt')
@@ -701,6 +678,7 @@ function Apply-SettingsToSelection {
             if ($lg -like "$($script:Settings.AudioLang)*") { $script:SelAudio = $i; break }
         }
     }
+
     $script:SelSub = 0
 }
 
@@ -708,7 +686,6 @@ function Build-AutoFormat {
     $r = [int]$script:Settings.MaxRes
     $lang = [string]$script:Settings.AudioLang
     $hFilter = if ($r -gt 0) { "[height<=$r]" } else { "" }
-
     if ($lang -ne 'original') {
         return "bestvideo$hFilter[vcodec^=avc1]+bestaudio[language^=$lang]/" +
                "bestvideo$hFilter+bestaudio[language^=$lang]/" +
@@ -737,11 +714,6 @@ function Sanitize-MetadataField {
 # ============================================
 # POST-PROCESSING MP3 MANUAL
 # ============================================
-# Konversi audio mentah ke MP3 via ffmpeg langsung (tidak lewat yt-dlp PPA).
-# - Slowed via asetrate + aresample (efek pitch+tempo turun, karakteristik kaset)
-# - Thumbnail di-crop square center 600x600
-# - Metadata di-set dari nol agar tidak dobel
-# - File sisa (.webp, audio mentah, thumbnail mentah) dibersihkan
 function Invoke-ManualAudioPostProcess {
     param(
         [Parameter(Mandatory=$true)][string]$RawAudioPath,
@@ -753,24 +725,18 @@ function Invoke-ManualAudioPostProcess {
         [string]$ThumbnailPath = ''
     )
 
-    # Fungsi pembersih semua file sementara di folder output.
-    # Dipanggil di finally agar SELALU jalan (sukses/gagal/exception).
     $cleanupTempFiles = {
         param($Dir, $RawPath, $ThumbPath, $CroppedPath)
         try {
-            # 1. Hapus file audio mentah dari yt-dlp
             if ($RawPath -and (Test-Path $RawPath)) {
                 Remove-Item -LiteralPath $RawPath -Force -ErrorAction SilentlyContinue
             }
-            # 2. Hapus thumbnail asli dari yt-dlp
             if ($ThumbPath -and (Test-Path $ThumbPath)) {
                 Remove-Item -LiteralPath $ThumbPath -Force -ErrorAction SilentlyContinue
             }
-            # 3. Hapus cover crop di temp
             if ($CroppedPath -and (Test-Path $CroppedPath)) {
                 Remove-Item -LiteralPath $CroppedPath -Force -ErrorAction SilentlyContinue
             }
-            # 4. Sapu bersih SEMUA sisa file temp & partial di folder output
             Get-ChildItem -Path $Dir -File -Force -ErrorAction SilentlyContinue |
                 Where-Object {
                     $_.Name -like '__tmp_ytdl__.*' -or
@@ -782,7 +748,6 @@ function Invoke-ManualAudioPostProcess {
                 ForEach-Object {
                     try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue } catch {}
                 }
-            # 5. Bereskan folder temp __yt_tmp_* (folder kosong) jika ada
             Get-ChildItem -Path $Dir -Directory -Force -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -like '__yt_tmp_*' } |
                 ForEach-Object {
@@ -795,29 +760,25 @@ function Invoke-ManualAudioPostProcess {
     $finalPath    = $null
 
     try {
-        # Pastikan file audio ada
         if (-not (Test-Path $RawAudioPath)) {
             Write-Log -Message "Input audio tidak ditemukan: $RawAudioPath" -Level ERROR
             return $null
         }
 
-        # Jeda 1 detik agar handle file dari yt-dlp benar-benar terlepas
-        Start-Sleep -Seconds 1
+        # Jeda singkat agar handle file terlepas (dikurangi dari 1s ke 400ms)
+        Start-Sleep -Milliseconds 400
 
         $safeTitle  = Sanitize-MetadataField $Title
         $safeArtist = Sanitize-MetadataField $Artist
         $baseName   = if ($safeTitle) { $safeTitle } else { "audio_$(Get-Date -Format 'yyyyMMdd_HHmmss')" }
-
-        # Buat nama file aman: buang karakter ilegal Windows + karakter kontrol 0x00-0x1F
-        $baseName = $baseName -replace '[\\\/:*?"<>|]', '_'
+        $baseName = $baseName -replace '[\\/:*?"<>|]', '_'
         $baseName = $baseName -replace '[\x00-\x1F\x7F]', ''
         $baseName = $baseName.Trim().TrimEnd('.')
         if (-not $baseName) { $baseName = "audio_$(Get-Date -Format 'yyyyMMdd_HHmmss')" }
-        # Batasi panjang nama file agar tidak melebihi batas Windows (260 char path)
         if ($baseName.Length -gt 120) { $baseName = $baseName.Substring(0, 120) }
+
         $finalPath = Join-Path $OutputDir "$baseName.mp3"
 
-        # Jika file dengan nama yang sama sudah ada -> TIMPA (hapus dulu, tanpa konfirmasi)
         if (Test-Path $finalPath) {
             try {
                 Remove-Item -LiteralPath $finalPath -Force -ErrorAction Stop
@@ -830,8 +791,6 @@ function Invoke-ManualAudioPostProcess {
         # 1. CROP THUMBNAIL (SQUARE CENTER 600x600)
         if ($ThumbnailPath -and (Test-Path $ThumbnailPath)) {
             $croppedThumb = Join-Path $env:TEMP "MD_cover_$([guid]::NewGuid().ToString('N')).jpg"
-            # crop=s:s:x:y  s=sisi terkecil  x,y=posisi tengah
-            # Ambil min(lebar,tinggi) lalu potong tepat di pusat gambar
             $vfExpr = "crop=min(iw\,ih):min(iw\,ih):(iw-min(iw\,ih))/2:(ih-min(iw\,ih))/2,scale=600:600"
             $cropCmd = "-y -hide_banner -loglevel error -i `"$ThumbnailPath`" -vf `"$vfExpr`" -frames:v 1 -q:v 2 `"$croppedThumb`""
 
@@ -841,13 +800,11 @@ function Invoke-ManualAudioPostProcess {
             $pInfoCrop.CreateNoWindow        = $true
             $pInfoCrop.UseShellExecute       = $false
             $pInfoCrop.RedirectStandardError = $true
-
             $pCrop = [System.Diagnostics.Process]::Start($pInfoCrop)
             $cropErrTask = $pCrop.StandardError.ReadToEndAsync()
             $pCrop.WaitForExit()
             try { [void]$cropErrTask.Result } catch {}
             $cropExit = $pCrop.ExitCode
-            # Pastikan handle process dilepas
             try { $pCrop.Close() } catch {}
             try { $pCrop.Dispose() } catch {}
 
@@ -864,32 +821,25 @@ function Invoke-ManualAudioPostProcess {
 
         # 2. KONVERSI MP3 + SLOWED + METADATA
         $rateText = $SlowedRate.ToString('0.######', [System.Globalization.CultureInfo]::InvariantCulture)
-
         $ffArgs = New-Object System.Collections.Generic.List[string]
         $ffArgs.Add("-y")
         $ffArgs.Add("-hide_banner")
         $ffArgs.Add("-loglevel"); $ffArgs.Add("error")
         $ffArgs.Add("-i"); $ffArgs.Add("`"$RawAudioPath`"")
         if ($croppedThumb) { $ffArgs.Add("-i"); $ffArgs.Add("`"$croppedThumb`"") }
-
         $ffArgs.Add("-map"); $ffArgs.Add("0:a:0")
         if ($croppedThumb) {
             $ffArgs.Add("-map"); $ffArgs.Add("1:v:0")
             $ffArgs.Add("-c:v"); $ffArgs.Add("mjpeg")
             $ffArgs.Add("-disposition:v:0"); $ffArgs.Add("attached_pic")
         }
-
         $ffArgs.Add("-c:a"); $ffArgs.Add("libmp3lame")
         $ffArgs.Add("-b:a"); $ffArgs.Add("320k")
         $ffArgs.Add("-ar"); $ffArgs.Add("44100")
-
-        # Efek slowed: asetrate + aresample (pitch turun + tempo lambat khas "kaset")
         if ($SlowedRate -lt 1.0 -and $SlowedRate -ge 0.5) {
             $afExpr = "asetrate=44100*$rateText,aresample=44100"
             $ffArgs.Add("-af"); $ffArgs.Add("`"$afExpr`"")
         }
-
-        # Metadata bersih (hapus semua, set ulang dari nol)
         $ffArgs.Add("-map_metadata"); $ffArgs.Add("-1")
         $ffArgs.Add("-metadata"); $ffArgs.Add("title=`"$safeTitle`"")
         if ($safeArtist) {
@@ -899,7 +849,6 @@ function Invoke-ManualAudioPostProcess {
         if ($UploadDate -and $UploadDate -match '^\d{8}') {
             $ffArgs.Add("-metadata"); $ffArgs.Add("date=$($UploadDate.Substring(0,4))")
         }
-
         $ffArgs.Add("-id3v2_version"); $ffArgs.Add("3")
         $ffArgs.Add("-write_id3v1"); $ffArgs.Add("1")
         $ffArgs.Add("`"$finalPath`"")
@@ -914,34 +863,26 @@ function Invoke-ManualAudioPostProcess {
         $pInfoFinal.UseShellExecute        = $false
         $pInfoFinal.RedirectStandardOutput = $true
         $pInfoFinal.RedirectStandardError  = $true
-
         $pFinal = [System.Diagnostics.Process]::Start($pInfoFinal)
-
-        # Baca async agar tidak deadlock
         $stderrTask = $pFinal.StandardError.ReadToEndAsync()
         $stdoutTask = $pFinal.StandardOutput.ReadToEndAsync()
-
-        # Tunggu proses selesai — file MP3 baru rilis setelah proses berakhir
         $pFinal.WaitForExit()
-
         $errorLog = ''
         try { $errorLog = $stderrTask.Result } catch {}
         try { [void]$stdoutTask.Result } catch {}
-
         $ffExit = $pFinal.ExitCode
-        # LEPASKAN HANDLE FFMPEG (sangat penting agar file tidak "nyangkut")
         try { $pFinal.Close() } catch {}
         try { $pFinal.Dispose() } catch {}
-        # Beri sistem sedikit waktu untuk melepaskan lock file
-        Start-Sleep -Milliseconds 300
+
+        # Jeda singkat agar file handle lepas (dikurangi dari 300ms ke 150ms)
+        Start-Sleep -Milliseconds 150
         [GC]::Collect()
-        [GC]::WaitForPendingFinalizers()
 
         if ($ffExit -eq 0 -and (Test-Path $finalPath)) {
             Write-Log -Message "Konversi selesai: $finalPath" -Level INFO
             return $finalPath
         } else {
-            $errTail = ($errorLog -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 5
+            $errTail = ($errorLog -split '\r?\n' | Where-Object { $_ }) | Select-Object -Last 5
             Write-Log -Message "FFMPEG gagal (exit $ffExit): $($errTail -join ' | ')" -Level ERROR
             if (Test-Path $finalPath) {
                 try { Remove-Item -LiteralPath $finalPath -Force -ErrorAction SilentlyContinue } catch {}
@@ -950,7 +891,6 @@ function Invoke-ManualAudioPostProcess {
         }
     }
     finally {
-        # Cleanup SELALU jalan (sukses/gagal/exception)
         & $cleanupTempFiles $OutputDir $RawAudioPath $ThumbnailPath $croppedThumb
     }
 }
@@ -978,7 +918,6 @@ function Clear-SessionState {
 # =====================================================
 function Test-DownloadPrerequisites {
     param([string]$Dir, [string]$Title = 'file')
-
     if (-not (Test-Path $Dir)) {
         try { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
         catch {
@@ -987,18 +926,16 @@ function Test-DownloadPrerequisites {
         }
     }
 
-    # Cek disk space (support drive lokal maupun UNC/network)
-    # Threshold adaptif: format audio butuh sedikit, video 4K butuh besar.
     $minMB = 200
     try {
         $fmt = [string]$script:Settings.Format
         $res = [int]$script:Settings.MaxRes
         if ($fmt -eq 'mp4') {
-            if     ($res -ge 2160) { $minMB = 3000 }   # 4K
-            elseif ($res -ge 1440) { $minMB = 1500 }   # 2K
-            elseif ($res -ge 1080) { $minMB = 800  }   # FHD
-            elseif ($res -ge 720)  { $minMB = 400  }   # HD
-            else                   { $minMB = 250  }   # SD/best
+            if     ($res -ge 2160) { $minMB = 3000 }
+            elseif ($res -ge 1440) { $minMB = 1500 }
+            elseif ($res -ge 1080) { $minMB = 800  }
+            elseif ($res -ge 720)  { $minMB = 400  }
+            else                   { $minMB = 250  }
         }
     } catch {}
 
@@ -1014,7 +951,6 @@ function Test-DownloadPrerequisites {
                 $drive = New-Object System.IO.DriveInfo($root.Substring(0, 2))
                 $freeBytes = $drive.AvailableFreeSpace
             }
-            # UNC path murni (\\server\share) tidak bisa dicek via DriveInfo, biarkan lolos
         }
         if ($null -ne $freeBytes) {
             $freeMB = [Math]::Round($freeBytes / 1MB, 0)
@@ -1026,15 +962,12 @@ function Test-DownloadPrerequisites {
     } catch {
         Write-Log -Message "Gagal cek disk space: $_" -Level DEBUG
     }
-
     return @{ Valid = $true; Message = '' }
 }
 
 # =====================================================
 # NETWORK CHECK & WAIT LOOP
 # =====================================================
-
-# Cek koneksi internet cepat (TCP handshake 1s ke DNS Cloudflare)
 function Test-InternetConnection {
     try {
         $tcp = New-Object System.Net.Sockets.TcpClient
@@ -1052,82 +985,26 @@ function Test-InternetConnection {
     }
 }
 
-# Klasifikasi apakah suatu error mengindikasikan masalah jaringan
 function Is-NetworkError {
     param([string]$ErrorText)
     if (-not $ErrorText) { return $false }
     $netPatterns = @(
-        # yt-dlp generic
-        'unable to download',           # "Unable to download webpage / API page / video data"
-        'unable to connect',
-        'unable to open',
-        'unable to fetch',
-        'failed to resolve',
-        # Koneksi umum
-        'connection reset',
-        'connection refused',
-        'connection aborted',
-        'connection error',
-        'connection timed out',
-        'connection.*closed',
-        'timed out',
-        'timeout',
-        'temporarily failed',
-        'temporary failure',
-        'network is unreachable',
-        'network.*down',
-        'no route to host',
-        'host is down',
-        'host unreachable',
-        # DNS
-        'temporary failure in name resolution',
-        'name or service not known',
-        'getaddrinfo failed',
-        'name resolution',
-        'nodename nor servname',
-        'dns',
-        # SSL/TLS
-        'ssl',
-        'certificate',
-        'handshake failed',
-        # Python/urllib khas yt-dlp
-        'httpsconnection',              # "HTTPSConnection(host=...)"
-        'httpconnection',
-        'httpsconnectionpool',
-        'httpconnectionpool',
-        'urlerror',
-        'urllib',
-        'connectionerror',
-        'connectionreseterror',
-        'connectionabortederror',
-        'connectionrefusederror',
-        'remotedisconnected',
-        'protocolerror',
-        'incompleteread',
-        'read operation timed out',
-        'read timed out',
-        'chunkedencodingerror',
-        'contenttoosmallerror',
-        # HTTP 5xx
-        'httperror\s*5\d\d',
-        'http error 5\d\d',
-        '\b5\d\d\s+(server|internal|bad|service|gateway)',
-        # Winsock error codes (Windows)
-        '10053',   # software caused connection abort
-        '10054',   # connection reset
-        '10060',   # connection timed out
-        '10061',   # connection refused
-        '10064',   # host is down
-        '10065',   # no route to host
-        '11001',   # host not found
-        '11002',   # non-authoritative host not found
-        '11003',   # non-recoverable error
-        '11004',   # valid name, no data
-        # Pesan generik yang biasa muncul saat internet mati
-        'winerror 1',
-        'errno 11',
-        'oserror',
-        '\[errno\s*-?\d+\]'
+        'unable to download', 'unable to connect', 'unable to open', 'unable to fetch',
+        'failed to resolve', 'connection reset', 'connection refused', 'connection aborted',
+        'connection error', 'connection timed out', 'connection.*closed', 'timed out',
+        'timeout', 'temporarily failed', 'temporary failure', 'network is unreachable',
+        'network.*down', 'no route to host', 'host is down', 'host unreachable',
+        'temporary failure in name resolution', 'name or service not known',
+        'getaddrinfo failed', 'name resolution', 'nodename nor servname', 'dns',
+        'ssl', 'certificate', 'handshake failed',
+        'httpsconnection', 'httpconnection', 'httpsconnectionpool', 'httpconnectionpool',
+        'urlerror', 'urllib', 'connectionerror', 'connectionreseterror',
+        'connectionabortederror', 'connectionrefusederror', 'remotedisconnected',
+        'protocolerror', 'incompleteread', 'read operation timed out', 'read timed out',
+        'chunkedencodingerror', 'contenttoosmallerror',
+        'httperror\s*5\d\d', 'http error 5\d\d', '\b5\d\d\s+(server|internal|bad|service|gateway)',
+        '10053', '10054', '10060', '10061', '10064', '10065', '11001', '11002', '11003', '11004',
+        'winerror 1', 'errno 11', 'oserror', '\[errno\s*-?\d+\]'
     )
     foreach ($p in $netPatterns) {
         if ($ErrorText -imatch $p) { return $true }
@@ -1135,23 +1012,15 @@ function Is-NetworkError {
     return $false
 }
 
-# Layar "Menunggu koneksi internet" — loop sampai koneksi balik atau user ESC
-# Return:
-#   $true  = koneksi kembali, silakan lanjut
-#   $false = user membatalkan
 function Wait-ForInternet {
     param([string]$Reason = 'koneksi terputus')
-
     Clear-Screen
-    Draw-Footer -Info 'menunggu jaringan'
-
+    Draw-Footer
     $h = Get-TermHeight
     $centerRow = [Math]::Max(4, [Math]::Floor($h / 2) - 2)
     $m = Get-PanelMetrics -MaxWidth 68
-
     Write-Center -Row ($centerRow - 2) -Text "$FG_YELLOW$BOLD Menunggu Koneksi Internet $RESET" -VisibleLen 27
     Write-PanelLine -Row $centerRow -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Alasan  :$RESET  $FG_WHITE$Reason$RESET" -Accent $FG_YELLOW
-
     Write-Log -Message "Wait-ForInternet dipanggil, alasan: $Reason" -Level WARN
 
     $i = 0
@@ -1160,7 +1029,6 @@ function Wait-ForInternet {
     $intervalSec = 2
 
     while ($true) {
-        # Cek input keyboard non-blocking
         while ([Console]::KeyAvailable) {
             $k = [Console]::ReadKey($true)
             if ($k.Key -eq 'Escape') {
@@ -1168,7 +1036,6 @@ function Wait-ForInternet {
                 return $false
             }
             if ($k.Key -eq 'R' -or $k.Key -eq 'Spacebar') {
-                # Force re-check sekarang
                 $lastCheck = [datetime]::MinValue
             }
         }
@@ -1176,29 +1043,24 @@ function Wait-ForInternet {
         $spin = $script:SpinChars[$i % 10]
         $now = Get-Date
         $secLeft = [Math]::Max(0, [Math]::Ceiling(($intervalSec - ($now - $lastCheck).TotalSeconds)))
-
         if (($now - $lastCheck).TotalSeconds -ge $intervalSec) {
             $lastCheck = $now
             $attempt++
             Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "$FG_CYAN$spin$RESET  ${FG_WHITE}Mengecek koneksi (percobaan $attempt)...$RESET" -Accent $FG_CYAN
-
             if (Test-InternetConnection) {
                 Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "$FG_GREEN$GL_CHECK  Koneksi tersambung kembali$RESET" -Accent $FG_GREEN
                 Write-Log -Message "Koneksi kembali setelah $attempt percobaan" -Level INFO
-                Start-Sleep -Milliseconds 700
+                Start-Sleep -Milliseconds 500
                 return $true
             } else {
                 Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "$FG_RED$GL_CROSS  Belum ada koneksi. Mencoba lagi dalam $intervalSec detik...$RESET" -Accent $FG_RED
-                # Backoff sederhana: naik ke 5 lalu 10 detik agar tidak spam
                 if ($attempt -eq 5) { $intervalSec = 5 }
                 if ($attempt -eq 15) { $intervalSec = 10 }
             }
         } else {
             Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "$FG_RED$GL_CROSS  Belum ada koneksi. Cek lagi dalam $secLeft detik...$RESET" -Accent $FG_RED
         }
-
         Write-Center -Row ($centerRow + 4) -Text "$FG_DIM esc  batal        r/space  cek sekarang$RESET"
-
         Start-Sleep -Milliseconds 200
         $i++
     }
@@ -1215,28 +1077,21 @@ function Invoke-WithRetry {
         [int]$MaxRetries = $script:MaxRetries,
         [string]$Label = ''
     )
-
     for ($attempt = 1; $attempt -le ($MaxRetries + 1); $attempt++) {
-        # Pre-check: pastikan internet ada sebelum eksekusi
         if (-not (Test-InternetConnection)) {
             Write-Log -Message "Pre-check: internet mati sebelum attempt $attempt untuk: $Label" -Level WARN
             $ok = Wait-ForInternet -Reason "Koneksi terputus"
             if (-not $ok) { return 'cancel' }
-            # Tidak konsumsi attempt counter, lanjut retry
             $attempt--
             continue
         }
-
         try {
             $result = & $Action
             if ($result -eq 'ok' -or $result -eq 'cancel') { return $result }
-
-            # Post-check: kalau fail, cek apakah karena network
             $errText = [string]$script:LastError
             $isNetIssue = ($errText -and (Is-NetworkError -ErrorText $errText)) -or (-not (Test-InternetConnection))
-
             if ($result -eq 'fail' -and $isNetIssue) {
-                Write-Log -Message "Deteksi network error attempt $attempt untuk: $Label. Err: $($errText.Substring(0,[Math]::Min(200,$errText.Length)))" -Level WARN
+                Write-Log -Message "Deteksi network error attempt $attempt untuk: $Label" -Level WARN
                 $ok = Wait-ForInternet -Reason "Download '$Label' terputus"
                 if (-not $ok) { return 'cancel' }
                 $attempt--
@@ -1251,24 +1106,246 @@ function Invoke-WithRetry {
                 continue
             }
         }
-
         if ($attempt -le $MaxRetries) {
             Write-Log -Message "Retry $attempt/$MaxRetries untuk: $Label" -Level WARN
-            Start-Sleep -Seconds (2 * $attempt)
+            Start-Sleep -Seconds (1 * $attempt)
         }
     }
     return 'fail'
 }
 
 # ============================================
+# YT-DLP AUTO-UPDATE SYSTEM
+# ============================================
+$script:YtdlpUpdateUrl = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest'
+
+function Get-YtdlpPath {
+    $binDir = $script:ConfigDir
+    $ytPath = Join-Path $binDir 'yt-dlp.exe'
+    if (Test-Path $ytPath) { return $ytPath }
+    $cmd = Get-Command yt-dlp -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $ytPath
+}
+
+function Get-YtdlpLocalVersion {
+    try {
+        $ytExe = Get-YtdlpPath
+        if (-not (Test-Path $ytExe)) { return $null }
+
+        $pInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $pInfo.FileName               = $ytExe
+        $pInfo.Arguments              = '--version'
+        $pInfo.CreateNoWindow         = $true
+        $pInfo.UseShellExecute        = $false
+        $pInfo.RedirectStandardOutput = $true
+        $pInfo.RedirectStandardError  = $true
+        $proc = [System.Diagnostics.Process]::Start($pInfo)
+        $output = $proc.StandardOutput.ReadToEnd().Trim()
+        $proc.WaitForExit(5000)
+        try { $proc.Close() } catch {}
+        try { $proc.Dispose() } catch {}
+
+        if ($output -match '^(\d{4}\.\d{2}\.\d{2})') {
+            return $matches[1]
+        }
+        return $output
+    } catch {
+        Write-Log -Message "Gagal baca versi yt-dlp: $_" -Level WARN
+        return $null
+    }
+}
+
+function Get-YtdlpRemoteVersion {
+    try {
+        # Gunakan GitHub API untuk cek versi terbaru (ringan, hanya JSON kecil)
+        $resp = Invoke-WebRequest -Uri $script:YtdlpUpdateUrl -UseBasicParsing -TimeoutSec 4
+        $json = $resp.Content | ConvertFrom-Json
+        $tag = $json.tag_name
+        if ($tag -match '^(\d{4}\.\d{2}\.\d{2})') {
+            return $matches[1]
+        }
+        return $null
+    } catch {
+        Write-Log -Message "Gagal cek versi yt-dlp remote: $_" -Level DEBUG
+        return $null
+    }
+}
+
+function Compare-YtdlpVersions {
+    param([string]$Local, [string]$Remote)
+    if (-not $Local -or -not $Remote) { return $false }
+    try {
+        # Format: 2024.01.02 - bandingkan sebagai version
+        $lParts = $Local -split '\.' | ForEach-Object { [int]$_ }
+        $rParts = $Remote -split '\.' | ForEach-Object { [int]$_ }
+        for ($i = 0; $i -lt [Math]::Max($lParts.Count, $rParts.Count); $i++) {
+            $lVal = if ($i -lt $lParts.Count) { $lParts[$i] } else { 0 }
+            $rVal = if ($i -lt $rParts.Count) { $rParts[$i] } else { 0 }
+            if ($rVal -gt $lVal) { return $true }
+            if ($rVal -lt $lVal) { return $false }
+        }
+        return $false
+    } catch { return $false }
+}
+
+function Update-Ytdlp {
+    param([bool]$ShowProgress = $true)
+
+    Write-Log -Message "Memulai update yt-dlp..." -Level INFO
+
+    $ytPath = Get-YtdlpPath
+    $binDir = $script:ConfigDir
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+    $ytTarget = Join-Path $binDir 'yt-dlp.exe'
+
+    # Jika yt-dlp bukan dari ConfigDir, backup dulu
+    $backupPath = $null
+    if ((Get-YtdlpPath) -ne $ytTarget) {
+        try {
+            $backupPath = Join-Path $binDir 'yt-dlp.exe.bak'
+            Copy-Item -Path (Get-YtdlpPath) -Destination $backupPath -Force -ErrorAction Stop
+        } catch {}
+    }
+
+    if ($ShowProgress) {
+        $tw = Get-TermWidth
+        $barWidth = [Math]::Min(46, [Math]::Max(18, $tw - 24))
+        $barCol = [Math]::Max(0, [Math]::Floor($tw / 2) - [Math]::Floor(($barWidth + 8) / 2))
+        $h = Get-TermHeight
+        $barRow = [Math]::Floor($h / 2)
+        $infoRow = $barRow + 2
+        Write-Center -Row ($barRow - 1) -Text "$FG_CYAN$BOLD Update yt-dlp$RESET" -VisibleLen 14
+        Write-Center -Row $infoRow -Text "$FG_GRAY Mengunduh versi terbaru...$RESET"
+    }
+
+    $ytUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+
+    # Download ke file temporary dulu agar tidak corrupt jika gagal di tengah
+    $tempPath = Join-Path $env:TEMP "yt-dlp_update_$([guid]::NewGuid().ToString('N')).exe"
+
+    try {
+        $ok = Download-FileWithProgress -Url $ytUrl -OutFile $tempPath -Label 'yt-dlp.exe' -BarRow $barRow -InfoRow $infoRow
+
+        if (-not $ok -or -not (Test-Path $tempPath)) {
+            Write-Log -Message "Download yt-dlp update gagal" -Level ERROR
+            return $false
+        }
+
+        # Verifikasi file download (minimal 5MB untuk exe yang valid)
+        $dlSize = (Get-Item $tempPath).Length
+        if ($dlSize -lt 5MB) {
+            Write-Log -Message "File yt-dlp terlalu kecil (${dlSize} bytes), kemungkinan corrupt" -Level ERROR
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            return $false
+        }
+
+        # Rename lama -> baru (atomic-ish)
+        if (Test-Path $ytTarget) {
+            $oldBackup = Join-Path $binDir 'yt-dlp.old'
+            if (Test-Path $oldBackup) { Remove-Item -LiteralPath $oldBackup -Force -ErrorAction SilentlyContinue }
+            try {
+                Move-Item -LiteralPath $ytTarget -Destination $oldBackup -Force -ErrorAction Stop
+            } catch {
+                # File mungkin masih locked, coba copy lalu overwrite
+                try {
+                    Copy-Item -LiteralPath $tempPath -Destination $ytTarget -Force -ErrorAction Stop
+                    Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+                    Write-Log -Message "yt-dlp updated (overwrite)" -Level INFO
+                    return $true
+                } catch {
+                    Write-Log -Message "Tidak bisa replace yt-dlp.exe: $_" -Level ERROR
+                    return $false
+                }
+            }
+        }
+
+        Move-Item -LiteralPath $tempPath -Destination $ytTarget -Force
+        Write-Log -Message "yt-dlp berhasil di-update ke $ytTarget" -Level INFO
+        return $true
+
+    } catch {
+        Write-Log -Message "Update yt-dlp error: $_" -Level ERROR
+        # Rollback jika ada backup
+        if ($backupPath -and (Test-Path $backupPath) -and -not (Test-Path $ytTarget)) {
+            try { Copy-Item -LiteralPath $backupPath -Destination $ytTarget -Force } catch {}
+        }
+        return $false
+    }
+}
+
+function Show-YtdlpUpdatePrompt {
+    param([string]$CurrentVersion, [string]$NewVersion)
+
+    Clear-Screen
+    Draw-Footer -Info 'update yt-dlp'
+    $h = Get-TermHeight
+    $m = Get-PanelMetrics -MaxWidth 68
+    $centerRow = [Math]::Max(4, [Math]::Floor($h / 2) - 4)
+
+    Write-Center -Row $centerRow -Text "$FG_CYAN$BOLD Update yt-dlp Tersedia $RESET" -VisibleLen 24
+    Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terinstall :$RESET  $FG_WHITE $CurrentVersion$RESET" -Accent $FG_CYAN
+    Write-PanelLine -Row ($centerRow + 3) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terbaru    :$RESET  $FG_GREEN$BOLD $NewVersion$RESET" -Accent $FG_CYAN
+    Write-Center -Row ($centerRow + 5) -Text "$FG_YELLOW Update yt-dlp sekarang? [Y/N]$RESET" -VisibleLen 30
+
+    $confirmed = $false
+    while ($true) {
+        $k = [Console]::ReadKey($true)
+        if ($k.KeyChar -eq 'y' -or $k.KeyChar -eq 'Y') { $confirmed = $true; break }
+        if ($k.KeyChar -eq 'n' -or $k.KeyChar -eq 'N' -or $k.Key -eq 'Escape') { $confirmed = $false; break }
+    }
+
+    if (-not $confirmed) {
+        Write-Log -Message "User menolak update yt-dlp" -Level INFO
+        return $false
+    }
+
+    $ok = Update-Ytdlp -ShowProgress $true
+    if ($ok) {
+        $newVer = Get-YtdlpLocalVersion
+        Write-Center -Row ($centerRow + 7) -Text "$FG_GREEN$GL_CHECK  yt-dlp berhasil di-update ke $newVer$RESET"
+        Write-Log -Message "yt-dlp di-update ke $newVer" -Level INFO
+    } else {
+        Write-Center -Row ($centerRow + 7) -Text "$FG_RED$GL_CROSS  Gagal update yt-dlp$RESET"
+    }
+    Start-Sleep -Milliseconds 800
+    return $ok
+}
+
+function Check-YtdlpUpdate {
+    param([bool]$Auto = $false)
+
+    $localVer = Get-YtdlpLocalVersion
+    if (-not $localVer) {
+        Write-Log -Message "Tidak bisa baca versi yt-dlp lokal, skip update check" -Level WARN
+        return $false
+    }
+
+    Write-Log -Message "Cek update yt-dlp: local=$localVer" -Level INFO
+    $remoteVer = Get-YtdlpRemoteVersion
+    if (-not $remoteVer) {
+        Write-Log -Message "Tidak bisa cek versi remote yt-dlp" -Level DEBUG
+        return $false
+    }
+
+    if (Compare-YtdlpVersions -Local $localVer -Remote $remoteVer) {
+        Write-Log -Message "Update yt-dlp tersedia: $localVer -> $remoteVer" -Level INFO
+        if ($Auto) {
+            return (Show-YtdlpUpdatePrompt -CurrentVersion $localVer -NewVersion $remoteVer)
+        }
+        return $true
+    } else {
+        Write-Log -Message "yt-dlp sudah versi terbaru ($localVer)" -Level INFO
+        return $false
+    }
+}
+
+# ============================================
 # CORE DOWNLOAD
 # ============================================
-
 function Invoke-ImageDownload {
     param([string]$URL)
-
     Write-Log -Message "Download gambar: $URL" -Level INFO
-
     Clear-Screen
     Draw-Footer
     $h = Get-TermHeight
@@ -1291,7 +1368,7 @@ function Invoke-ImageDownload {
         if (Test-Path $outPath) {
             $size = [Math]::Round((Get-Item $outPath).Length / 1KB, 2)
             Write-Center -Row $centerRow -Text "$FG_GREEN$GL_CHECK Selesai ($size KB) - $filename$RESET"
-            Start-Sleep -Milliseconds 800
+            Start-Sleep -Milliseconds 500
             Write-Log -Message "Gambar berhasil: $filename ($size KB)" -Level INFO
             return 'ok'
         }
@@ -1317,10 +1394,8 @@ function Invoke-Download {
         [bool]$SkipCookies = $false
     )
 
-    # Label prefix untuk tampilan progress bar (outer scope)
     $labelPrefix = if ($Label) { "$Label   $GL_DOT   " } else { '' }
 
-    # Inner helper untuk menjalankan satu kali proses
     function Invoke-DownloadProcess {
         param([bool]$UseCookies)
 
@@ -1348,7 +1423,6 @@ function Invoke-Download {
         }
 
         if ($OutputFormat -eq 'mp3') {
-            # Bersihkan sisa file dari session sebelumnya (jika ada)
             try {
                 Get-ChildItem -Path $script:SaveDir -File -Force -ErrorAction SilentlyContinue |
                     Where-Object { $_.Name -like '__tmp_ytdl__.*' -or $_.Name -like '__yt_tmp_*' } |
@@ -1357,7 +1431,6 @@ function Invoke-Download {
                     }
             } catch {}
 
-            # yt-dlp HANYA download audio mentah + thumbnail asli.
             $tempId = [guid]::NewGuid().ToString('N')
             $tempBase = "__tmp_ytdl__.$tempId"
             $tempAudioTemplate = Join-Path $script:SaveDir "$tempBase.%(ext)s"
@@ -1366,12 +1439,10 @@ function Invoke-Download {
             $ytArgs.Add("--write-thumbnail")
             $ytArgs.Add("--no-part")
             $ytArgs.Add("--force-overwrites")
-            # Simpan base name untuk pemrosesan manual
             $script:_Mp3TempBase = $tempBase
         } else {
             $ytArgs.Add("--merge-output-format"); $ytArgs.Add("mp4")
             $ytArgs.Add("-f"); $ytArgs.Add($FormatString)
-
             if ($SubLang) {
                 $ytArgs.Add("--write-subs"); $ytArgs.Add("--write-auto-subs")
                 $ytArgs.Add("--sub-langs"); $ytArgs.Add("$SubLang*")
@@ -1402,20 +1473,18 @@ function Invoke-Download {
         $barCol = [Math]::Max(0, [Math]::Floor($tw / 2) - [Math]::Floor(($barWidth + 8) / 2))
         $spinIdx = 0
         $lastPctInt = -1
-        $labelPrefix = if ($Label) { "$Label   $GL_DOT   " } else { '' }
         $cancelled = $false
 
-        # Reset tampilan progress bar
         Out-Ansi ((Ansi-Pos $BarRow 0) + "$ESC[2K" + (Ansi-Pos $BarRow $barCol) + $FG_DIM + ($GL_LIGHT * $barWidth) + $RESET + "  $FG_WHITE${BOLD}0%   $RESET")
         Write-Center -Row $StatsRow -Text "$FG_GRAY${labelPrefix}menghubungkan...   ${FG_DIM}(esc batal)$RESET"
 
         $readTask = $null
+
         while ($true) {
             if ($null -eq $readTask) {
                 if ($proc.StandardOutput.EndOfStream) { break }
                 $readTask = $proc.StandardOutput.ReadLineAsync()
             }
-
             $done = $false
             try { $done = $readTask.Wait(120) } catch { $done = $true }
 
@@ -1442,7 +1511,6 @@ function Invoke-Download {
                 $eta      = $matches[3].Trim()
                 $downSize = $matches[4].Trim()
                 $totSize  = $matches[5].Trim()
-
                 $pct = -1.0; $tmp = 0.0
                 if ([double]::TryParse($pctStr, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$tmp)) { $pct = $tmp }
 
@@ -1456,7 +1524,7 @@ function Invoke-Download {
                         $filled = [Math]::Floor($barWidth * $pctInt / 100)
                         $empty  = $barWidth - $filled
                         $s = (Ansi-Pos $BarRow 0) + "$ESC[2K" + (Ansi-Pos $BarRow $barCol) +
-                             $FG_BLUE + ($GL_FULL * $filled) + $FG_DIM + ($GL_LIGHT * $empty) + $RESET +
+                             $FG_BLUE + ($GL_FULL  *$filled) + $FG_DIM + ($GL_LIGHT*  $empty) + $RESET +
                              "  $FG_WHITE$BOLD$(([string]$pctInt + '%').PadRight(5))$RESET"
                         Out-Ansi $s
                         $statsFull = Limit-Text -Text ($labelPrefix + $stats) -Max ($tw - 4)
@@ -1496,7 +1564,7 @@ function Invoke-Download {
                         $filled = [Math]::Floor($barWidth * $pctInt / 100)
                         $empty  = $barWidth - $filled
                         $s = (Ansi-Pos $BarRow 0) + "$ESC[2K" + (Ansi-Pos $BarRow $barCol) +
-                             $FG_BLUE + ($GL_FULL * $filled) + $FG_DIM + ($GL_LIGHT * $empty) + $RESET +
+                             $FG_BLUE + ($GL_FULL  *$filled) + $FG_DIM + ($GL_LIGHT*  $empty) + $RESET +
                              "  $FG_WHITE$BOLD$(([string]$pctInt + '%').PadRight(5))$RESET"
                         Out-Ansi $s
                     }
@@ -1542,13 +1610,11 @@ function Invoke-Download {
         $errText = ''
         try { $errText = $errTask.Result } catch {}
         $exitCode = $proc.ExitCode
-        # Lepas handle yt-dlp (penting untuk playlist besar agar tidak memory leak)
         try { $proc.Close() } catch {}
         try { $proc.Dispose() } catch {}
         return @{ ExitCode = $exitCode; StdErr = $errText; Cancelled = $false }
     }
 
-    # Jalankan pertama: dengan cookies (kecuali SkipCookies)
     $useCookies = (-not $SkipCookies)
     $result = Invoke-DownloadProcess -UseCookies $useCookies
 
@@ -1558,42 +1624,30 @@ function Invoke-Download {
         return 'cancel'
     }
 
-    # Helper: jalankan post-process MP3 manual jika perlu
     function Complete-Mp3PostDownload {
         if ($OutputFormat -ne 'mp3') { return 'ok' }
-
         $tempBase = $script:_Mp3TempBase
         if (-not $tempBase) {
             Write-Log -Message "TempBase kosong, tidak bisa cari file audio" -Level ERROR
             return 'fail'
         }
 
-        # Cari semua file yang dimulai dengan base name kita
-        $matches = Get-ChildItem -Path $script:SaveDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -eq $tempBase -or $_.Name -like "$tempBase.*" }
+        Start-Sleep -Milliseconds 500
 
-        # Tunggu sebentar untuk memastikan file sudah ditulis ke disk sepenuhnya
-        Start-Sleep -Seconds 1
-
-        # Pisahkan audio (non-image) dan thumbnail (image)
         $audioExts = @('.m4a','.opus','.webm','.ogg','.wav','.aac','.flac','.mka','.mp3','.mp4')
         $imageExts = @('.jpg','.jpeg','.png','.webp')
-        
         $rawAudioFile = $null
         $thumbFile    = $null
 
-        # Ambil file terbaru dari matches
         $allMatches = Get-ChildItem -Path $script:SaveDir -File -ErrorAction SilentlyContinue |
             Where-Object { $_.BaseName -eq $tempBase -or $_.Name -like "$tempBase.*" } |
             Sort-Object LastWriteTime -Descending
-
         foreach ($f in $allMatches) {
             $ext = $f.Extension.ToLower()
             if ($audioExts -contains $ext -and -not $rawAudioFile) { $rawAudioFile = $f }
             elseif ($imageExts -contains $ext -and -not $thumbFile) { $thumbFile = $f }
         }
 
-        # Ambil judul & artis dari $script:VideoInfo
         $dlTitle  = ''
         $dlArtist = ''
         $dlDate   = ''
@@ -1603,13 +1657,10 @@ function Invoke-Download {
             try { if (-not $dlArtist -and $script:VideoInfo.channel) { $dlArtist = [string]$script:VideoInfo.channel } } catch {}
             try { if ($script:VideoInfo.upload_date) { $dlDate   = [string]$script:VideoInfo.upload_date } } catch {}
         }
-
-        # Fallback title dari nama file jika kosong
         if (-not $dlTitle) { $dlTitle = "audio_$(Get-Date -Format 'yyyyMMdd_HHmmss')" }
 
         if (-not $rawAudioFile -or -not (Test-Path $rawAudioFile.FullName)) {
-            Write-Log -Message "Tidak ditemukan file audio mentah dengan base '$tempBase' di $script:SaveDir" -Level ERROR
-            # Bersihkan file thumbnail sisa jika ada
+            Write-Log -Message "Tidak ditemukan file audio mentah dengan base '$tempBase'" -Level ERROR
             if ($thumbFile) { try { Remove-Item $thumbFile.FullName -Force -ErrorAction SilentlyContinue } catch {} }
             return 'fail'
         }
@@ -1649,19 +1700,11 @@ function Invoke-Download {
     }
 
     $errText = [string]$result.StdErr
-
     $cookieErrorPatterns = @(
-        'could not copy.*cookie',
-        'cannot copy.*cookie',
-        'cookie database',
-        'cookies could not',
-        'unable to read.*cookies?',
-        'keyerror.*cookies?',
-        'cannot access.*cookie',
-        'permission denied.*cookie',
-        'locked.*cookie',
-        'database.*is locked',
-        'chrome cookie database'
+        'could not copy.*cookie', 'cannot copy.*cookie', 'cookie database',
+        'cookies could not', 'unable to read.*cookies?', 'keyerror.*cookies?',
+        'cannot access.*cookie', 'permission denied.*cookie', 'locked.*cookie',
+        'database.*is locked', 'chrome cookie database'
     )
     $isCookieError = $false
     foreach ($p in $cookieErrorPatterns) {
@@ -1671,25 +1714,20 @@ function Invoke-Download {
     if ($isCookieError -and $useCookies) {
         Write-Log -Message "Cookies browser gagal, retry tanpa cookies..." -Level WARN
         Write-Center -Row $StatsRow -Text "$FG_YELLOW${labelPrefix}cookies browser terkunci, coba tanpa cookies...$RESET"
-        Start-Sleep -Milliseconds 500
-
+        Start-Sleep -Milliseconds 300
         $result = Invoke-DownloadProcess -UseCookies $false
-
         if ($result.Cancelled) {
             Write-Center -Row $StatsRow -Text "$FG_ORANGE${labelPrefix}dibatalkan$RESET"
-            Write-Log -Message "Download dibatalkan user (retry)" -Level WARN
             return 'cancel'
         }
-
         if ($result.ExitCode -eq 0) {
-            Write-Log -Message "Download selesai setelah retry tanpa cookies (exit code 0)" -Level INFO
+            Write-Log -Message "Download selesai setelah retry tanpa cookies" -Level INFO
             if ($OutputFormat -eq 'mp3') {
                 $ppResult = Complete-Mp3PostDownload
                 return $ppResult
             }
             return 'ok'
         }
-
         $errText = [string]$result.StdErr
     }
 
@@ -1701,11 +1739,9 @@ function Invoke-Download {
 # ============================================
 # SCREEN 1: WELCOME
 # ============================================
-
 function Show-WelcomeScreen {
     Clear-Screen
     Draw-Footer
-
     $h = Get-TermHeight
     $tw = Get-TermWidth
     $showLogo = ($h -ge 22 -and $tw -ge ($script:LogoWidth + 4))
@@ -1731,8 +1767,11 @@ function Show-WelcomeScreen {
         $prefText = "Format: $($script:Settings.Format.ToUpper())  $GL_DOT  Dubbing: $(Get-AudioLangLabel $script:Settings.AudioLang)  $GL_DOT  Resolusi: $(Get-ResLabel $script:Settings.MaxRes)"
         Write-Center -Row ($folderRow + 4) -Text "$FG_ORANGE$GL_BULLET$RESET  $FG_GRAY$prefText$RESET"
     }
-    if (($folderRow + 5) -lt ($h - 1)) {
-        Write-Center -Row ($folderRow + 5) -Text "$FG_DIM ketik 'update' untuk cek versi baru$RESET"
+
+    # Tampilkan versi yt-dlp di welcome screen
+    $ytdlpVer = Get-YtdlpLocalVersion
+    if ($ytdlpVer -and (($folderRow + 5) -lt ($h - 1))) {
+        Write-Center -Row ($folderRow + 5) -Text "$FG_DIM yt-dlp v$ytdlpVer   $GL_DOT   ketik 'update' untuk cek update$RESET"
     }
 
     $urlBuf   = ''
@@ -1760,7 +1799,6 @@ function Show-WelcomeScreen {
             $urlMax = $m.Inner - 2
             $curPlatform = $script:Platforms[$script:PlatformIdx]
             $curBlocked = Is-PlatformBlocked -Platform $curPlatform.Name
-
             $shown = "URL: " + $urlBuf
             $isPlaceholder = $false
             $placeholderColor = $FG_DIM
@@ -1811,7 +1849,7 @@ function Show-WelcomeScreen {
                 if (Is-PlatformBlocked -Platform $platform.Name) {
                     Unblock-Platform -Platform $platform.Name
                     Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK $($platform.Name) berhasil dibuka blokirnya$RESET"
-                    Start-Sleep -Milliseconds 900
+                    Start-Sleep -Milliseconds 600
                     Write-Line -Row ($inputRow + 1) -Text ''
                 }
                 $urlBuf = ''
@@ -1821,15 +1859,40 @@ function Show-WelcomeScreen {
             }
 
             if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'update') {
-                Write-Center -Row ($inputRow + 1) -Text "$FG_CYAN$($script:SpinChars[0]) Mengecek update dari GitHub...$RESET"
+                # Cek update skrip
+                Write-Center -Row ($inputRow + 1) -Text "$FG_CYAN$($script:SpinChars[0]) Mengecek update...$RESET"
                 $upResult = Check-Update -Manual $true
                 if ($upResult -eq 'uptodate') {
-                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK Sudah versi terbaru (v$($script:AppVersion))$RESET"
+                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK Skrip sudah versi terbaru (v$($script:AppVersion))$RESET"
                 } elseif ($upResult -eq 'error') {
-                    Write-Center -Row ($inputRow + 1) -Text "$FG_RED$GL_CROSS Gagal cek update. Cek koneksi internet.$RESET"
+                    Write-Center -Row ($inputRow + 1) -Text "$FG_RED$GL_CROSS Gagal cek update skrip.$RESET"
                 }
-                Start-Sleep -Milliseconds 1500
+
+                # Cek update yt-dlp
+                Write-Center -Row ($inputRow + 2) -Text "$FG_CYAN$($script:SpinChars[0]) Mengecek update yt-dlp...$RESET"
+                $ytdlpUpdated = Check-YtdlpUpdate -Auto $true
+                if (-not $ytdlpUpdated) {
+                    $curYtdlpVer = Get-YtdlpLocalVersion
+                    Write-Center -Row ($inputRow + 2) -Text "$FG_GREEN$GL_CHECK yt-dlp sudah versi terbaru ($curYtdlpVer)$RESET"
+                }
+
+                Start-Sleep -Milliseconds 1000
                 Write-Line -Row ($inputRow + 1) -Text ''
+                Write-Line -Row ($inputRow + 2) -Text ''
+                $urlBuf = ''
+                $lastIdx = -1
+                $lastUrl = $null
+                continue
+            }
+
+            if ($field -eq 0 -and $urlBuf.Trim().ToLower() -eq 'ytdlp-update') {
+                $ok = Check-YtdlpUpdate -Auto $true
+                if (-not $ok) {
+                    $curYtdlpVer = Get-YtdlpLocalVersion
+                    Write-Center -Row ($inputRow + 1) -Text "$FG_GREEN$GL_CHECK yt-dlp sudah versi terbaru ($curYtdlpVer)$RESET"
+                    Start-Sleep -Milliseconds 800
+                    Write-Line -Row ($inputRow + 1) -Text ''
+                }
                 $urlBuf = ''
                 $lastIdx = -1
                 $lastUrl = $null
@@ -1880,11 +1943,9 @@ function Show-WelcomeScreen {
 # ============================================
 # SETTINGS SCREEN
 # ============================================
-
 function Show-SettingsScreen {
     Clear-Screen
     Draw-Footer -Info 'settings'
-
     $h = Get-TermHeight
     $m = Get-PanelMetrics -MaxWidth 64
     $top = [Math]::Max(1, [Math]::Floor($h / 2) - 7)
@@ -1896,14 +1957,15 @@ function Show-SettingsScreen {
     for ($i = 0; $i -lt $script:AudioLangOptions.Count; $i++) {
         if ($script:AudioLangOptions[$i].Code -eq $script:Settings.AudioLang) { $audioIdx = $i; break }
     }
+
     $resIdx = 0
     for ($i = 0; $i -lt $script:ResOptions.Count; $i++) {
         if ($script:ResOptions[$i] -eq $script:Settings.MaxRes) { $resIdx = $i; break }
     }
+
     $formatIdx = if ($script:Settings.Format -eq 'mp3') { 1 } else { 0 }
     $formatOptions = @('MP4 (Video + Audio)', 'MP3 (Audio Only)')
 
-    # Slowed Rate options
     $slowedPresets = @(1.00, 0.95, 0.90, 0.85, 0.75, 0.50)
     $slowedIdx = 0
     for ($i = 0; $i -lt $slowedPresets.Count; $i++) {
@@ -1911,7 +1973,6 @@ function Show-SettingsScreen {
     }
     $slowedLabel = if ($script:Settings.SlowedRate -eq 1.00) { "1.00x (Normal)" } else { "$($script:Settings.SlowedRate.ToString('0.00'))x" }
 
-    # Player options
     $detectedPlayers = Get-InstalledMediaPlayers
     $playerOptions = @(
         @{ Code = 'off';     Label = 'Off (tidak autoplay)' }
@@ -1941,7 +2002,6 @@ function Show-SettingsScreen {
             $rLabel = Get-ResLabel $script:ResOptions[$resIdx]
             $plLabel = $playerOptions[$playerIdx].Label
             $slowedDisplay = if ($editMode -and $editField -eq 'slowed') { $slowedBuf + 'x' } else { $slowedLabel }
-
             $fMax = [Math]::Max(8, $m.Inner - 17)
             $fText = $folderBuf
             if ($fText.Length -gt $fMax) {
@@ -1996,10 +2056,10 @@ function Show-SettingsScreen {
                 if ($key.Key -eq 'Enter') {
                     try {
                         $newRate = [double]::Parse($slowedBuf, [System.Globalization.CultureInfo]::InvariantCulture)
-                    if ($newRate -ge 0.50 -and $newRate -le 1.00) {
-                        $script:Settings.SlowedRate = $newRate
-                        $slowedLabel = "$($newRate.ToString('0.00'))x"
-                    }
+                        if ($newRate -ge 0.50 -and $newRate -le 1.00) {
+                            $script:Settings.SlowedRate = $newRate
+                            $slowedLabel = "$($newRate.ToString('0.00'))x"
+                        }
                     } catch {
                         Write-Log -Message "Invalid slowed rate input: $slowedBuf" -Level WARN
                     }
@@ -2089,121 +2149,153 @@ function Show-SettingsScreen {
 }
 
 # ============================================
-# SCREEN 2: FETCHING
+# SCREEN 2: FETCHING (FAST - NO START-JOB)
 # ============================================
-
 function Invoke-FetchJson {
     param([string]$URL, [string]$Message, [bool]$Flat)
 
-    # Wrapper dengan auto-retry saat network mati.
-    # Jika Test-InternetConnection gagal di awal, langsung tampil Wait-ForInternet.
     if (-not (Test-InternetConnection)) {
         $ok = Wait-ForInternet -Reason 'Tidak ada koneksi internet'
         if (-not $ok) { return $null }
     }
 
-    $maxTries = 5
+    $maxTries = 3
     for ($try = 1; $try -le $maxTries; $try++) {
-        $result = Invoke-FetchJsonOnce -URL $URL -Message $Message -Flat $Flat
+        $result = Invoke-FetchJsonFast -URL $URL -Message $Message -Flat $Flat
         if ($null -ne $result) { return $result }
 
-        # Cek apakah gagal karena network
         $err = [string]$script:LastError
         if ($err -and (Is-NetworkError -ErrorText $err)) {
-            Write-Log -Message "Fetch gagal karena network (try $try), menunggu koneksi..." -Level WARN
+            Write-Log -Message "Fetch gagal karena network (try $try)" -Level WARN
             $ok = Wait-ForInternet -Reason 'Fetch info gagal, koneksi bermasalah'
             if (-not $ok) { return $null }
-            continue  # Retry
+            continue
         }
 
-        # Cek juga dengan test koneksi langsung (kadang error tidak jelas)
         if (-not (Test-InternetConnection)) {
-            Write-Log -Message "Fetch gagal & koneksi mati (try $try)" -Level WARN
             $ok = Wait-ForInternet -Reason 'Koneksi terputus saat fetch'
             if (-not $ok) { return $null }
             continue
         }
 
-        # Bukan masalah network, gagal betulan
         return $null
     }
     return $null
 }
 
-function Invoke-FetchJsonOnce {
+# VERSI CEPAT: Menggunakan System.Diagnostics.Process langsung (bukan Start-Job)
+# Start-Job spawn seluruh PowerShell process baru -> lambat (2-5s overhead)
+# Process langsung -> instant start, langsung dapat output via async pipe
+function Invoke-FetchJsonFast {
     param([string]$URL, [string]$Message, [bool]$Flat)
 
-    Write-Log -Message "Fetch info: $URL (flat=$Flat)" -Level INFO
-
+    Write-Log -Message "Fetch info (fast): $URL (flat=$Flat)" -Level INFO
     $script:LastError = ''
+
     Clear-Screen
     Draw-Footer
 
     $h = Get-TermHeight
     $centerRow = [Math]::Floor($h / 2)
-
     $flatArg = if ($Flat) { '--flat-playlist' } else { '--no-playlist' }
+
     $ck = Get-CookieBrowserForYtdlp
 
-    $job = Start-Job -ScriptBlock {
-        param($u, $fa, $ck)
+    # Build arguments untuk yt-dlp
+    $ytArgs = New-Object System.Collections.Generic.List[string]
+    $ytArgs.Add("-J")
+    $ytArgs.Add($flatArg)
+    $ytArgs.Add("--extractor-args"); $ytArgs.Add("youtube:player_client=all")
+    $ytArgs.Add("--no-warnings")
 
-        if ($ck) {
-            $errOutput = & yt-dlp -J $fa --cookies-from-browser $ck --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
-            $json = $errOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
-            $errText = ($errOutput | Where-Object { $_ -isnot [string] -or -not $_.TrimStart().StartsWith('{') }) -join "`n"
+    if ($ck) {
+        $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($ck)
+        Write-Log -Message "Fetch menggunakan cookies dari: $ck" -Level DEBUG
+    }
 
-            if ($json) { return @{ Success = $true; Data = ($json -join ''); Error = '' } }
+    $ytArgs.Add($URL)
 
-            $errOutput2 = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
-            $json2 = $errOutput2 | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
-            $errText2 = ($errOutput2 | Where-Object { $_ -isnot [string] -or -not $_.TrimStart().StartsWith('{') }) -join "`n"
-            if ($json2) { return @{ Success = $true; Data = ($json2 -join ''); Error = '' } }
-            return @{ Success = $false; Data = $null; Error = "$errText`n$errText2" }
-        }
-        else {
-            $errOutput = & yt-dlp -J $fa --extractor-args "youtube:player_client=all" --no-warnings $u 2>&1
-            $json = $errOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }
-            $errText = ($errOutput | Where-Object { $_ -isnot [string] -or -not $_.TrimStart().StartsWith('{') }) -join "`n"
-            if ($json) { return @{ Success = $true; Data = ($json -join ''); Error = '' } }
-            return @{ Success = $false; Data = $null; Error = $errText }
-        }
-    } -ArgumentList $URL, $flatArg, $ck
+    # Jalankan yt-dlp langsung sebagai Process (bukan Start-Job)
+    $procInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $procInfo.FileName               = "yt-dlp"
+    $procInfo.Arguments              = ($ytArgs | ForEach-Object { '"' + ($_ -replace '(\\*)"', '$1$1\"') + '"' }) -join ' '
+    $procInfo.CreateNoWindow         = $true
+    $procInfo.UseShellExecute        = $false
+    $procInfo.RedirectStandardOutput = $true
+    $procInfo.RedirectStandardError  = $true
+    $procInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
 
     $shortUrl = Limit-Text -Text $URL -Max ([Math]::Max(20, (Get-TermWidth) - 8))
     Write-Center -Row ($centerRow + 2) -Text "$FG_DIM$shortUrl$RESET"
 
+    try {
+        $proc = [System.Diagnostics.Process]::Start($procInfo)
+    } catch {
+        $script:LastError = "Gagal start yt-dlp: $_"
+        Write-Log -Message $script:LastError -Level ERROR
+        return $null
+    }
+
+    # Baca stdout dan stderr secara async untuk menghindari deadlock
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
+
     $i = 0
     $cancelled = $false
-    while ($job.State -eq 'Running') {
+
+    while (-not $proc.HasExited) {
         $spin = $script:SpinChars[$i % 10]
         Write-Center -Row $centerRow -Text "$FG_CYAN$spin$RESET  $FG_WHITE$Message$RESET  ${FG_DIM}(esc batal)$RESET"
+
         while ([Console]::KeyAvailable) {
             $k = [Console]::ReadKey($true)
             if ($k.Key -eq 'Escape') { $cancelled = $true; break }
         }
         if ($cancelled) { break }
-        Start-Sleep -Milliseconds 80
+
+        Start-Sleep -Milliseconds 50
         $i++
     }
 
     if ($cancelled) {
-        try { Stop-Job -Job $job -ErrorAction SilentlyContinue } catch {}
-        try { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue } catch {}
+        try { $proc.Kill() } catch {}
+        try { $proc.WaitForExit(3000) } catch {}
+        try { $proc.Close() } catch {}
+        try { $proc.Dispose() } catch {}
         Write-Log -Message "Fetch dibatalkan user" -Level WARN
         return $null
     }
 
-    $result = Receive-Job -Job $job
-    Remove-Job -Job $job -Force
+    # Tunggu sampai semua output terbaca (stdout + stderr harus selesai)
+    $proc.WaitForExit()
+    $stdout = ''
+    $stderr = ''
+    try { $stdout = $stdoutTask.Result } catch {}
+    try { $stderr = $stderrTask.Result } catch {}
 
-    if (-not $result -or -not $result.Success -or -not $result.Data) {
-        $script:LastError = if ($result -and $result.Error) { [string]$result.Error } else { 'yt-dlp tidak mengembalikan data' }
+    $exitCode = $proc.ExitCode
+    try { $proc.Close() } catch {}
+    try { $proc.Dispose() } catch {}
+
+    if ($exitCode -ne 0 -and -not $stdout) {
+        $script:LastError = if ($stderr) { $stderr } else { "yt-dlp exit code $exitCode" }
         Write-Log -Message "Fetch gagal: $script:LastError" -Level ERROR
         return $null
     }
+
+    if (-not $stdout) {
+        $script:LastError = 'yt-dlp tidak mengembalikan data'
+        Write-Log -Message "Fetch gagal: $script:LastError" -Level ERROR
+        return $null
+    }
+
     $script:LastError = ''
-    try { return ($result.Data | ConvertFrom-Json) } catch {
+    try { return ($stdout | ConvertFrom-Json) } catch {
+        # Coba extract JSON dari output yang mungkin ada noise
+        $jsonMatch = [regex]::Match($stdout, '\{[\s\S]*\}')
+        if ($jsonMatch.Success) {
+            try { return ($jsonMatch.Value | ConvertFrom-Json) } catch {}
+        }
         $script:LastError = 'Gagal parse JSON dari yt-dlp'
         Write-Log -Message "Parse JSON gagal: $_" -Level ERROR
         return $null
@@ -2213,16 +2305,12 @@ function Invoke-FetchJsonOnce {
 # ============================================
 # SCREEN 3: FORMAT
 # ============================================
-
 function Show-FormatScreen {
     param([bool]$FullFeature = $true)
-
     Clear-Screen
     Draw-Footer
-
     $h = Get-TermHeight
     $tw = Get-TermWidth
-
     $title = [string]$script:VideoInfo.title
     $duration = "?"
     if ($script:VideoInfo.duration) {
@@ -2230,25 +2318,19 @@ function Show-FormatScreen {
         $duration = if ($ts.Hours -gt 0) { "{0}:{1:d2}:{2:d2}" -f $ts.Hours, $ts.Minutes, $ts.Seconds } else { "{0}:{1:d2}" -f $ts.Minutes, $ts.Seconds }
     }
     $uploader = if ($script:VideoInfo.uploader) { [string]$script:VideoInfo.uploader } else { "?" }
-
     $m = Get-PanelMetrics -MaxWidth 76
     $maxItems = [Math]::Max(3, [Math]::Min(8, $h - 12))
     $startRow = [Math]::Max(1, [Math]::Floor(($h - ($maxItems + 9)) / 2))
 
     $titleText = Limit-Text -Text $title -Max ($m.Inner - 1)
     $upText = Limit-Text -Text $uploader -Max ([Math]::Max(8, $m.Inner - $duration.Length - 5))
-
     Write-PanelLine -Row $startRow -Col $m.Col -Width $m.Width -Text "$FG_WHITE$BOLD$titleText$RESET"
     Write-PanelLine -Row ($startRow + 1) -Col $m.Col -Width $m.Width -Text "$FG_GRAY$duration  $GL_DOT  $upText$RESET"
 
     $colStart = $startRow + 3
-
-    # Jika setting global MP3 dan platform full-feature, kita bypass di main loop.
-    # Untuk non-full feature, kita tetap tampilkan pilihan format.
     $colCount = if ($FullFeature) { 3 } else { 2 }
     $lists = if ($FullFeature) { @($script:Resolutions, $script:AudioTracks, $script:SubtitleList) } else { @($script:FormatOptions, $script:Resolutions) }
     $headers = if ($FullFeature) { @('Resolusi', 'Audio', 'Subtitle') } else { @('Format', 'Resolusi') }
-
     $gap = 4
     $colWidth = [Math]::Floor(([Math]::Min(70, $tw - 6) - ($gap * ($colCount - 1))) / $colCount)
     $totalW = ($colWidth * $colCount) + ($gap * ($colCount - 1))
@@ -2272,7 +2354,6 @@ function Show-FormatScreen {
     }
 
     $dirty = $true
-
     while ($true) {
         if ($dirty) {
             $sb = New-Object System.Text.StringBuilder
@@ -2288,6 +2369,7 @@ function Show-FormatScreen {
                 $listCount = $lists[$c].Count
                 $start = 0
                 if ($selIdx -ge $maxItems) { $start = $selIdx - $maxItems + 1 }
+
                 for ($r = 0; $r -lt $maxItems; $r++) {
                     $i = $start + $r
                     $row = $colStart + 2 + $r
@@ -2310,6 +2392,7 @@ function Show-FormatScreen {
 
         $key = [Console]::ReadKey($true)
         $dirty = $true
+
         switch ($key.Key) {
             'UpArrow' {
                 if ($FullFeature) {
@@ -2355,12 +2438,11 @@ $script:FormatOptions = @(
 )
 
 # =====================================================
-# SLOWED RATE PROMPT (setelah user pilih download musik)
+# SLOWED RATE PROMPT
 # =====================================================
 function Show-SlowedRatePrompt {
     Clear-Screen
     Draw-Footer -Info 'slowed rate'
-
     $h = Get-TermHeight
     $tw = Get-TermWidth
     $m = Get-PanelMetrics -MaxWidth 68
@@ -2387,14 +2469,12 @@ function Show-SlowedRatePrompt {
                        elseif ($buf -eq '0.75') { 'Lambat berat' }
                        elseif ($buf -eq '0.50') { 'Sangat lambat' }
                        else { "Kustom: ${buf}x" }
-
             Write-PanelLine -Row $cursorRow -Col $m.Col -Width $m.Width -Text "${FG_WHITE}Nilai:${RESET}  $FG_CYAN$BOLD${buf}x$RESET  $FG_GRAY($preview)$RESET" -Accent $FG_BLUE
             Write-PanelLine -Row ($cursorRow + 2) -Col $m.Col -Width $m.Width -Text "$FG_DIM$GL_LEFT$GL_RIGHT pilih   ketik angka (0.50-1.00)   enter lanjut   esc batal$RESET"
             $dirty = $false
         }
 
         $key = [Console]::ReadKey($true)
-
         switch ($key.Key) {
             'LeftArrow' {
                 $presets = @('1.00','0.95','0.90','0.85','0.75','0.50')
@@ -2422,9 +2502,7 @@ function Show-SlowedRatePrompt {
                 } catch {}
                 $dirty = $true
             }
-            'Escape' {
-                return $script:Settings.SlowedRate
-            }
+            'Escape' { return $script:Settings.SlowedRate }
             'Backspace' { if ($buf.Length -gt 0) { $buf = $buf.Substring(0, $buf.Length - 1); $dirty = $true } }
             default {
                 if ($key.KeyChar -and ($key.KeyChar -match '[0-9.]')) {
@@ -2439,7 +2517,6 @@ function Show-SlowedRatePrompt {
 # ============================================
 # SCREEN 4a: DOWNLOAD SINGLE
 # ============================================
-
 function Show-DownloadScreen {
     param(
         [string]$URL,
@@ -2448,10 +2525,7 @@ function Show-DownloadScreen {
         [string]$SelectedOutputFormat = ''
     )
 
-    # Tentukan output format akhir
     $finalOutputFormat = if ($ForceAudio) { 'mp3' } elseif ($SelectedOutputFormat) { $SelectedOutputFormat } else { 'mp4' }
-
-    # Untuk MP3, tampilkan prompt slowed rate sebelum download (dijamin konsisten sampai akhir)
     $effectiveSlowedRate = 1.0
     if ($finalOutputFormat -eq 'mp3') {
         $effectiveSlowedRate = Show-SlowedRatePrompt
@@ -2459,10 +2533,8 @@ function Show-DownloadScreen {
 
     Clear-Screen
     Draw-Footer
-
     $h = Get-TermHeight
     $centerRow = [Math]::Max(5, [Math]::Floor($h / 2))
-
     $title = [string]$script:VideoInfo.title
     $m = Get-PanelMetrics -MaxWidth 76
     $titleText = Limit-Text -Text $title -Max ($m.Inner - 1)
@@ -2483,11 +2555,9 @@ function Show-DownloadScreen {
         $resolution = $script:Resolutions[$script:SelRes]
         $audio      = $script:AudioTracks[$script:SelAudio]
         $subtitle   = $script:SubtitleList[$script:SelSub]
-
         $vid = $resolution.FormatID
         $audioID = if ($audio.FormatID) { $audio.FormatID } else { "bestaudio" }
         $fString = "$vid+$audioID/$vid+bestaudio/best"
-
         return Invoke-Download -URL $URL -FormatString $fString -SubLang $subtitle.Lang -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
     } else {
         $resolution = $script:Resolutions[$script:SelAudio]
@@ -2500,22 +2570,17 @@ function Show-DownloadScreen {
 # ============================================
 # SCREEN 4b: PLAYLIST
 # ============================================
-
 function Show-PlaylistScreen {
     param($Info, [bool]$ForceAudio = $false)
-
     $entries = @($Info.entries | Where-Object { $_ })
     if ($entries.Count -eq 0) { return }
 
     $plTitle = if ($Info.title) { [string]$Info.title } else { 'Playlist' }
-
     Clear-Screen
     Draw-Footer -Info 'playlist'
-
     $h = Get-TermHeight
     $m = Get-PanelMetrics -MaxWidth 76
     $topRow = 1
-
     $playlistTag = if ($ForceAudio) { " (YT Music)" } else { "" }
     Write-PanelLine -Row $topRow -Col $m.Col -Width $m.Width -Text "$FG_WHITE$BOLD$(Limit-Text -Text $plTitle -Max ($m.Inner - 1 - $playlistTag.Length))$playlistTag$RESET"
     if ($ForceAudio) {
@@ -2528,7 +2593,6 @@ function Show-PlaylistScreen {
     $barRow   = $h - 4
     $statsRow = $h - 3
     $listMax  = [Math]::Max(2, $barRow - $listTop - 1)
-
     $status = @{}
     for ($i = 0; $i -lt $entries.Count; $i++) { $status[$i] = 0 }
     $script:PlWindowStart = 0
@@ -2546,7 +2610,6 @@ function Show-PlaylistScreen {
         if ($r -lt 0 -or $r -ge $listMax) { return }
         $row = $listTop + $r
         $etitle = Limit-Text -Text (Get-EntryTitle $Idx) -Max ($m.Inner - 10)
-
         $mark = '[ ]'; $mcolor = $FG_DIM; $tcolor = $FG_GRAY
         switch ($status[$Idx]) {
             1 { $mark = "[$GL_ARROW]"; $mcolor = $FG_CYAN;  $tcolor = $FG_WHITE }
@@ -2564,7 +2627,6 @@ function Show-PlaylistScreen {
         if ($Current -ge ($script:PlWindowStart + $listMax)) { $newStart = $Current - $listMax + 1 }
         elseif ($Current -lt $script:PlWindowStart) { $newStart = $Current }
         $script:PlWindowStart = $newStart
-
         for ($r = 0; $r -lt $listMax; $r++) {
             $idx = $script:PlWindowStart + $r
             if ($idx -lt $entries.Count) { Draw-PlaylistItem -Idx $idx }
@@ -2583,8 +2645,6 @@ function Show-PlaylistScreen {
 
     $fString = Build-AutoFormat
     $outFmt = if ($ForceAudio) { 'mp3' } else { $script:Settings.Format }
-
-    # Kecepatan slowed untuk playlist audio (sama untuk semua track)
     $playlistSlowedRate = 1.0
     if ($outFmt -eq 'mp3') {
         $playlistSlowedRate = Show-SlowedRatePrompt
@@ -2592,11 +2652,8 @@ function Show-PlaylistScreen {
 
     $okCount = 0
     $stopAll = $false
-
     for ($i = 0; $i -lt $entries.Count; $i++) {
         if ($stopAll) { $status[$i] = 4; Draw-PlaylistItem -Idx $i; continue }
-
-        # Bungkus per-entry dalam try/catch agar satu crash tidak hentikan seluruh playlist
         try {
             $e = $entries[$i]
             $vurl = ''
@@ -2607,7 +2664,6 @@ function Show-PlaylistScreen {
 
             $status[$i] = 1
             Draw-PlaylistWindow -Current $i
-
             $label = "Video $($i + 1)/$($entries.Count)"
 
             $prereq = Test-DownloadPrerequisites -Dir $script:SaveDir -Title $label
@@ -2616,7 +2672,7 @@ function Show-PlaylistScreen {
                 Draw-PlaylistItem -Idx $i
                 Write-Center -Row $statsRow -Text "$FG_RED$GL_CROSS  $($prereq.Message)$RESET"
                 Start-Sleep -Seconds 1
-                continue  # Skip entry ini, coba entry berikutnya
+                continue
             }
 
             $res = Invoke-WithRetry -Action {
@@ -2626,7 +2682,6 @@ function Show-PlaylistScreen {
             if ($res -eq 'ok') { $status[$i] = 2; $okCount++ }
             elseif ($res -eq 'cancel') { $status[$i] = 4; $stopAll = $true }
             else { $status[$i] = 3 }
-
             Draw-PlaylistItem -Idx $i
         } catch {
             Write-Log -Message "Entry $($i+1) crash: $_" -Level ERROR
@@ -2648,20 +2703,16 @@ function Show-PlaylistScreen {
 # ============================================
 # SCREEN 5: DONE / ERROR
 # ============================================
-
 function Show-DoneScreen {
     param([string]$Result, [string]$Message = "")
     Clear-Screen
     Draw-Footer
-
     $h = Get-TermHeight
     $centerRow = [Math]::Max(2, [Math]::Floor($h / 2) - 3)
 
     if ($Result -eq 'ok') {
         Write-Center -Row $centerRow -Text "$FG_GREEN$BOLD$GL_CHECK  Download Selesai$RESET"
-        if ($Message) {
-            Write-Center -Row ($centerRow + 1) -Text "$FG_GRAY$Message$RESET"
-        }
+        if ($Message) { Write-Center -Row ($centerRow + 1) -Text "$FG_GRAY$Message$RESET" }
         $m = Get-PanelMetrics -MaxWidth 76
         $saveText = Limit-Text -Text $script:SaveDir -Max ($m.Inner - 1)
         Write-PanelLine -Row ($centerRow + 3) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Tersimpan di:$RESET" -Accent $FG_GREEN
@@ -2680,7 +2731,6 @@ function Show-DoneScreen {
 
     $hintRow = [Math]::Min($centerRow + 7, $h - 2)
     Write-Center -Row $hintRow -Text "$FG_DIM enter  download lagi     esc  keluar$RESET"
-
     while ($true) {
         $key = [Console]::ReadKey($true)
         if ($key.Key -eq 'Enter')  { return $true }
@@ -2692,13 +2742,10 @@ function Show-ErrorScreen {
     param([string]$Message)
     Clear-Screen
     Draw-Footer
-
     $h = Get-TermHeight
     $centerRow = [Math]::Floor($h / 2)
-
     Write-Center -Row ($centerRow - 1) -Text "$FG_RED$BOLD$GL_CROSS  $Message$RESET"
     Write-Center -Row ([Math]::Min($centerRow + 3, $h - 2)) -Text "$FG_DIM enter  coba lagi     esc  keluar$RESET"
-
     while ($true) {
         $key = [Console]::ReadKey($true)
         if ($key.Key -eq 'Enter')  { return $true }
@@ -2709,7 +2756,6 @@ function Show-ErrorScreen {
 # ============================================
 # DEPENDENCY CHECK
 # ============================================
-
 $script:UpdateUrl = 'https://raw.githubusercontent.com/Danishtzy24/media-downloader-cli/main/MediaDownloader.ps1'
 
 function Get-RemoteVersion {
@@ -2734,10 +2780,8 @@ function Is-NewerVersion {
 
 function Show-UpdateScreen {
     param([string]$NewVersion, [string]$FullContent, [bool]$Manual = $false)
-
     Clear-Screen
     Draw-Footer -Info 'update'
-
     $h = Get-TermHeight
     $m = Get-PanelMetrics -MaxWidth 72
     $centerRow = [Math]::Max(4, [Math]::Floor($h / 2) - 4)
@@ -2746,7 +2790,6 @@ function Show-UpdateScreen {
     Write-PanelLine -Row ($centerRow + 2) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terinstall :$RESET  $FG_WHITE v$($script:AppVersion)$RESET" -Accent $FG_CYAN
     Write-PanelLine -Row ($centerRow + 3) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Versi terbaru    :$RESET  $FG_GREEN$BOLD v$NewVersion$RESET" -Accent $FG_CYAN
 
-    # Tentukan lokasi skrip yang sedang berjalan untuk overwrite file yang benar
     $installPath = $null
     try {
         if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
@@ -2758,8 +2801,6 @@ function Show-UpdateScreen {
     }
 
     Write-PanelLine -Row ($centerRow + 5) -Col $m.Col -Width $m.Width -Text "${FG_GRAY}Lokasi          :$RESET  $FG_WHITE$(Limit-Text -Text $installPath -Max ($m.Inner - 18))$RESET" -Accent $FG_CYAN
-
-    # Konfirmasi Y/N sebelum menimpa
     Write-Center -Row ($centerRow + 7) -Text "$FG_YELLOW Update sekarang? [Y/N]$RESET" -VisibleLen 26
 
     $confirmed = $false
@@ -2771,12 +2812,11 @@ function Show-UpdateScreen {
 
     if (-not $confirmed) {
         Write-Center -Row ($centerRow + 7) -Text "$FG_DIM Update dibatalkan.$RESET"
-        Start-Sleep -Milliseconds 800
+        Start-Sleep -Milliseconds 500
         return $false
     }
 
     Write-Center -Row ($centerRow + 7) -Text "$FG_GRAY Menyimpan update...$RESET"
-
     try {
         Set-Content -Path $installPath -Value $FullContent -Force -Encoding UTF8
         Write-Center -Row ($centerRow + 9) -Text "$FG_GREEN$GL_CHECK  Update berhasil diinstal$RESET"
@@ -2793,7 +2833,6 @@ function Show-UpdateScreen {
     }
     Write-Center -Row ($centerRow + 11) -Text "$FG_GREEN Selesai.$RESET"
     Start-Sleep -Milliseconds 500
-
     Clear-Screen
     try { [Console]::CursorVisible = $true } catch {}
     exit 0
@@ -2828,9 +2867,7 @@ function Download-FileWithProgress {
         [int]$BarRow,
         [int]$InfoRow
     )
-
     Write-Log -Message "Download file: $Url -> $OutFile" -Level INFO
-
     $tw = Get-TermWidth
     $barWidth = [Math]::Min(46, [Math]::Max(18, $tw - 24))
     $barCol   = [Math]::Max(0, [Math]::Floor($tw / 2) - [Math]::Floor(($barWidth + 8) / 2))
@@ -2844,7 +2881,6 @@ function Download-FileWithProgress {
         $totalBytes = $resp.ContentLength
         $stream = $resp.GetResponseStream()
         $fs = [System.IO.File]::Create($OutFile)
-
         $buffer = New-Object byte[] 65536
         $downloaded = 0L
         $lastRenderPct = -1
@@ -2853,7 +2889,6 @@ function Download-FileWithProgress {
         while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
             $fs.Write($buffer, 0, $read)
             $downloaded += $read
-
             if ($totalBytes -gt 0) {
                 $pct = [int](($downloaded / $totalBytes) * 100)
                 if ($pct -ne $lastRenderPct) {
@@ -2871,10 +2906,7 @@ function Download-FileWithProgress {
             }
         }
 
-        $fs.Close()
-        $stream.Close()
-        $resp.Close()
-
+        $fs.Close(); $stream.Close(); $resp.Close()
         $bar = $FG_BLUE + ($GL_FULL * $barWidth) + $RESET
         Out-Ansi ((Ansi-Pos $BarRow 0) + "$ESC[2K" + (Ansi-Pos $BarRow $barCol) + $bar + "  $FG_WHITE${BOLD}100% $RESET")
         Write-Log -Message "Download file selesai: $OutFile" -Level INFO
@@ -2894,16 +2926,13 @@ function Test-Dependencies {
     Draw-Footer
     $h = Get-TermHeight
     $centerRow = [Math]::Floor($h / 2)
-
     Write-Center -Row ($centerRow - 5) -Text "$FG_CYAN${BOLD}Menyiapkan Media Downloader$RESET"
 
     $binDir = $script:ConfigDir
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-
     $ytPath  = Join-Path $binDir 'yt-dlp.exe'
     $ffZip   = Join-Path $env:TEMP 'media-ffmpeg.zip'
     $ffDir   = Join-Path $binDir 'ffmpeg'
-
     $stepRow = $centerRow - 2
     $barRow  = $centerRow
     $infoRow = $centerRow + 2
@@ -2926,11 +2955,11 @@ function Test-Dependencies {
 
     Write-Line -Row $stepRow -Text ''
     Write-Line -Row $infoRow -Text ''
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds 200
 
     $okFf = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        Write-Center -Row $stepRow -Text "$FG_DIM [ 2 / 2 ]$RESET   $FG_WHITE ffmpeg$RESET   $FG_DIM(untuk merge, convert, dan pemrosesan audio, percobaan $attempt)$RESET"
+        Write-Center -Row $stepRow -Text "$FG_DIM [ 2 / 2 ]$RESET   $FG_WHITE ffmpeg$RESET   $FG_DIM(percobaan $attempt)$RESET"
         $ffUrl = 'https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip'
         $okFf = Download-FileWithProgress -Url $ffUrl -OutFile $ffZip -Label 'ffmpeg.zip' -BarRow $barRow -InfoRow $infoRow
         if ($okFf) { break }
@@ -2950,20 +2979,20 @@ function Test-Dependencies {
             Remove-Item $ffDir -Recurse -Force -ErrorAction SilentlyContinue
         } catch {
             Write-Log -Message "ffmpeg ekstrak gagal: $_" -Level ERROR
-            Write-Center -Row $infoRow -Text "$FG_ORANGE ffmpeg gagal diekstrak (beberapa fitur pemrosesan audio mungkin tidak tersedia)$RESET"
-            Start-Sleep -Seconds 1
+            Write-Center -Row $infoRow -Text "$FG_ORANGE ffmpeg gagal diekstrak$RESET"
+            Start-Sleep -Milliseconds 500
         }
     } else {
-        Write-Log -Message "ffmpeg download gagal setelah 3 percobaan" -Level ERROR
-        Write-Center -Row $infoRow -Text "$FG_ORANGE ffmpeg gagal diunduh (beberapa fitur pemrosesan audio mungkin tidak tersedia)$RESET"
-        Start-Sleep -Seconds 1
+        Write-Log -Message "ffmpeg download gagal" -Level ERROR
+        Write-Center -Row $infoRow -Text "$FG_ORANGE ffmpeg gagal diunduh$RESET"
+        Start-Sleep -Milliseconds 500
     }
 
     if ($env:Path -notlike "*$binDir*") { $env:Path = "$binDir;$env:Path" }
 
     if (Test-Path $ytPath) {
         Write-Center -Row ($infoRow + 3) -Text "$FG_GREEN$GL_CHECK  Semua siap. Memulai aplikasi...$RESET"
-        Start-Sleep -Milliseconds 1000
+        Start-Sleep -Milliseconds 500
         return $true
     } else {
         Write-Center -Row ($infoRow + 3) -Text "$FG_RED$GL_CROSS  Gagal install otomatis.$RESET"
@@ -2976,16 +3005,33 @@ function Test-Dependencies {
 # ============================================
 # MAIN LOOP
 # ============================================
-
 try {
     Load-Settings
     Load-Blocklist
-    Write-Log -Message "Settings loaded. SaveDir: $script:SaveDir, Format: $($script:Settings.Format), SlowedDefault: $($script:Settings.SlowedRate)x" -Level INFO
+    Write-Log -Message "Settings loaded. SaveDir: $script:SaveDir, Format: $($script:Settings.Format)" -Level INFO
 
     if (-not (Test-Dependencies)) { exit }
 
+    # Cek update skrip
     if ($script:Settings.AutoUpdate) {
         [void](Check-Update)
+    }
+
+    # AUTO-CHECK update yt-dlp saat startup (non-blocking visual, langsung prompt)
+    if ($script:Settings.AutoUpdate) {
+        Write-Log -Message "Checking yt-dlp update at startup..." -Level INFO
+        try {
+            $ytdlpLocalVer = Get-YtdlpLocalVersion
+            $ytdlpRemoteVer = Get-YtdlpRemoteVersion
+            if ($ytdlpLocalVer -and $ytdlpRemoteVer -and (Compare-YtdlpVersions -Local $ytdlpLocalVer -Remote $ytdlpRemoteVer)) {
+                Write-Log -Message "yt-dlp update available: $ytdlpLocalVer -> $ytdlpRemoteVer" -Level INFO
+                [void](Show-YtdlpUpdatePrompt -CurrentVersion $ytdlpLocalVer -NewVersion $ytdlpRemoteVer)
+            } else {
+                Write-Log -Message "yt-dlp is up to date ($ytdlpLocalVer)" -Level INFO
+            }
+        } catch {
+            Write-Log -Message "yt-dlp update check failed: $_" -Level DEBUG
+        }
     }
 
     $running = $true
@@ -2996,8 +3042,8 @@ try {
         if ($url -eq 'RELOAD') { continue }
 
         Write-Log -Message "URL entered: $url" -Level INFO
-
         $detectedPlatform = Detect-Platform -Url $url
+
         if (Is-PlatformBlocked -Platform $detectedPlatform) {
             $reason = Get-BlockReason -Platform $detectedPlatform
             $retry = Show-ErrorScreen -Message "$detectedPlatform diblokir permanen. $reason"
@@ -3052,7 +3098,6 @@ try {
             if ($target.webpage_url) { $vurl = [string]$target.webpage_url }
             elseif ($target.url -and ([string]$target.url -match '^https?://')) { $vurl = [string]$target.url }
             elseif ($target.id) { $vurl = "https://www.youtube.com/watch?v=$($target.id)" }
-
             $info = Invoke-FetchJson -URL $vurl -Message 'Membaca format video...' -Flat $false
             if (-not $info) {
                 $retry = Show-ErrorScreen -Message "Gagal membaca format video"
@@ -3071,11 +3116,9 @@ try {
             continue
         }
 
-        # YT Music / Global MP3: auto audio only, langsung ke download dengan slowed prompt
         if ($isYTMusic -or ($isFullFeature -and $isGlobalMp3)) {
             $savedFormat = $script:Settings.Format
             $script:Settings.Format = 'mp3'
-
             $result = Invoke-WithRetry -Action {
                 Show-DownloadScreen -URL $url -FullFeature $false -ForceAudio $true
             } -Label "Download audio $url"
@@ -3090,26 +3133,24 @@ try {
                     default   { $errRaw }
                 }
             }
+
             if ($result -eq 'ok') {
                 $latestFile = Get-LatestDownloadedFile -Dir $script:SaveDir
-                if ($latestFile) {
-                    Invoke-AutoplayMedia -FilePath $latestFile.FullName
-                }
+                if ($latestFile) { Invoke-AutoplayMedia -FilePath $latestFile.FullName }
                 Record-PlatformSuccess -Platform $detectedPlatform
             } elseif ($result -eq 'fail') {
                 Record-PlatformFail -Platform $detectedPlatform -Reason 'Download gagal' -ErrorText $script:LastError
             }
+
             $again = Show-DoneScreen -Result $result -Message $errMsg
             $script:Settings.Format = $savedFormat
             if (-not $again) { $running = $false }
             continue
         }
 
-        # Format selection screen
         $confirm = Show-FormatScreen -FullFeature $isFullFeature
         if (-not $confirm) { continue }
 
-        # Tentukan format yang dipilih user (untuk non-full-feature)
         $selectedOutputFmt = 'mp4'
         if (-not $isFullFeature) {
             $selectedOutputFmt = $script:FormatOptions[$script:SelRes].Value
@@ -3129,9 +3170,7 @@ try {
         if ($result -eq 'ok') {
             Record-PlatformSuccess -Platform $detectedPlatform
             $latestFile = Get-LatestDownloadedFile -Dir $script:SaveDir
-            if ($latestFile) {
-                Invoke-AutoplayMedia -FilePath $latestFile.FullName
-            }
+            if ($latestFile) { Invoke-AutoplayMedia -FilePath $latestFile.FullName }
         } elseif ($result -eq 'fail') {
             Record-PlatformFail -Platform $detectedPlatform -Reason 'Download gagal' -ErrorText $script:LastError
         }
@@ -3146,6 +3185,7 @@ try {
                 default   { $errRaw }
             }
         }
+
         $again = Show-DoneScreen -Result $result -Message $errMsg
         if (-not $again) { $running = $false }
     }
