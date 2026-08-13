@@ -98,6 +98,11 @@ $script:SelSub       = 0
 $script:ActiveCol    = 0
 $script:PlatformIdx  = 0
 $script:LastError    = ""
+$script:NeedsCookies       = $false
+$script:LastClientTier     = ''
+$script:LastDownloadedFile = $null
+$script:YtdlpVersion       = $null
+$script:YtdlpExe           = $null
 $script:Platforms    = @(
     [PSCustomObject]@{ Name = 'YouTube';   Hint = 'youtube.com/watch?v=... atau playlist'; Full = $true }
     [PSCustomObject]@{ Name = 'TikTok';    Hint = 'tiktok.com/@user/video/...';              Full = $false }
@@ -173,6 +178,89 @@ function Is-FullFeaturePlatform {
 function Is-YouTubeMusicUrl {
     param([string]$Url)
     return ($Url -match 'music\.youtube\.com')
+}
+
+# =====================================================
+# PERFORMANCE INSTRUMENTATION
+# =====================================================
+$script:Perf = @{ spawn = -1; extraction = -1; parse = -1; total = -1; retries = 0; cookieFallback = $false; fallbackReason = '' }
+
+function Reset-Perf {
+    $script:Perf = @{ spawn = -1; extraction = -1; parse = -1; total = -1; retries = 0; cookieFallback = $false; fallbackReason = '' }
+}
+
+function Trace-Perf {
+    param([string]$Op)
+    $p = $script:Perf
+    $spawn = if ($p.spawn -ge 0) { "$($p.spawn) ms" } else { '-' }
+    $ext   = if ($p.extraction -ge 0) { "$($p.extraction) ms" } else { '-' }
+    $parse = if ($p.parse -ge 0) { "$($p.parse) ms" } else { '-' }
+    $total = if ($p.total -ge 0) { "$($p.total) ms" } else { '-' }
+    $line = "[PERF] ${Op}: spawn=$spawn network/extraction=$ext json_parse=$parse total=$total retries=$($p.retries) cookies=$($p.cookieFallback) fallback=$($p.fallbackReason)"
+    Write-Log -Message $line -Level DEBUG
+    if ($env:MD_BENCH) { Write-Host $line }
+}
+
+# =====================================================
+# METADATA CACHE (session, TTL 5 menit)
+# =====================================================
+$script:MetaCache = @{}
+$script:MetaCacheTtl = [TimeSpan]::FromMinutes(5)
+
+function Normalize-Url {
+    param([string]$Url)
+    $u = $Url.Trim()
+    try {
+        $u = $u -replace '^https?://(www\.)?', 'https://'
+        $u = [regex]::Replace($u, '[?&](?:si|utm_[a-z_]+)=[^&]*', '&')
+        $u = $u -replace '\?&', '?'
+        $u = $u -replace '[?&]$', ''
+    } catch {}
+    return $u
+}
+
+function Get-CachedMeta {
+    param([string]$Url, [bool]$Flat)
+    if (-not $script:MetaCache.ContainsKey($Url)) { return $null }
+    $e = $script:MetaCache[$Url]
+    if ($e.Flat -ne $Flat) { return $null }
+    if (((Get-Date) - $e.Time) -gt $script:MetaCacheTtl) {
+        $script:MetaCache.Remove($Url)
+        return $null
+    }
+    Write-Log -Message "Metadata cache hit: $Url (flat=$Flat)" -Level DEBUG
+    return $e.Data
+}
+
+function Set-CachedMeta {
+    param([string]$Url, $Data, [bool]$Flat, [bool]$Cookies = $false, [string]$Tier = '')
+    if ($null -eq $Data) { return }
+    if ($script:MetaCache.Count -ge 20) {
+        $expired = @($script:MetaCache.Keys | Where-Object { ((Get-Date) - $script:MetaCache[$_].Time) -gt $script:MetaCacheTtl })
+        foreach ($k in $expired) { $script:MetaCache.Remove($k) }
+        if ($script:MetaCache.Count -ge 20) {
+            $oldest = ($script:MetaCache.GetEnumerator() | Sort-Object { $_.Value.Time } | Select-Object -First 1).Key
+            if ($oldest) { $script:MetaCache.Remove($oldest) }
+        }
+    }
+    $script:MetaCache[$Url] = @{ Time = Get-Date; Data = $Data; Flat = $Flat; Cookies = $Cookies; Tier = $Tier }
+}
+
+# =====================================================
+# URL CLASSIFICATION
+# =====================================================
+function Test-IsPlaylistUrl {
+    param([string]$Url)
+    return ($Url -imatch '[?&](list|playlist)=|/playlist(?:/|\?|$)|/mix\?|/playlists?/')
+}
+
+function ConvertTo-ArgString {
+    param($ArgList)
+    return (($ArgList | ForEach-Object {
+        $s = $_ -replace '(\\*)"', '$1$1\"'
+        $s = $s -replace '(\\+)$', '$1$1'
+        '"' + $s + '"'
+    }) -join ' ')
 }
 
 # =====================================================
@@ -392,10 +480,6 @@ function Detect-Browser {
         if (Test-Path $c.Path) { return $c.Code }
     }
     return $null
-}
-
-function Get-CookieBrowserForYtdlp {
-    return (Detect-Browser)
 }
 
 function Ensure-Dir {
@@ -765,8 +849,7 @@ function Invoke-ManualAudioPostProcess {
             return $null
         }
 
-        # Jeda singkat agar handle file terlepas (dikurangi dari 1s ke 400ms)
-        Start-Sleep -Milliseconds 400
+        # Handle file sudah terlepas setelah proses yt-dlp exit (diverifikasi oleh caller via poll)
 
         $safeTitle  = Sanitize-MetadataField $Title
         $safeArtist = Sanitize-MetadataField $Artist
@@ -874,10 +957,6 @@ function Invoke-ManualAudioPostProcess {
         try { $pFinal.Close() } catch {}
         try { $pFinal.Dispose() } catch {}
 
-        # Jeda singkat agar file handle lepas (dikurangi dari 300ms ke 150ms)
-        Start-Sleep -Milliseconds 150
-        [GC]::Collect()
-
         if ($ffExit -eq 0 -and (Test-Path $finalPath)) {
             Write-Log -Message "Konversi selesai: $finalPath" -Level INFO
             return $finalPath
@@ -908,6 +987,9 @@ function Clear-SessionState {
     $script:SelSub            = 0
     $script:ActiveCol         = 0
     $script:LastError         = ''
+    $script:NeedsCookies      = $false
+    $script:LastClientTier    = ''
+    $script:LastDownloadedFile = $null
     $script:_Mp3TempBase      = ''
     $script:_Mp3RawAudioPath  = ''
     $script:_Mp3ThumbnailPath = ''
@@ -1012,6 +1094,21 @@ function Is-NetworkError {
     return $false
 }
 
+function Test-PermanentError {
+    param([string]$ErrorText)
+    if (-not $ErrorText) { return $false }
+    $permanentPatterns = @(
+        'unsupported url', 'no video formats', 'no such format',
+        'is not a valid url', 'video unavailable', 'has been removed',
+        'removed by', 'does not exist', '404: not found',
+        'not available in your country', 'blocked in your', 'geo.?restricted'
+    )
+    foreach ($p in $permanentPatterns) {
+        if ($ErrorText -imatch $p) { return $true }
+    }
+    return $false
+}
+
 function Wait-ForInternet {
     param([string]$Reason = 'koneksi terputus')
     Clear-Screen
@@ -1078,19 +1175,11 @@ function Invoke-WithRetry {
         [string]$Label = ''
     )
     for ($attempt = 1; $attempt -le ($MaxRetries + 1); $attempt++) {
-        if (-not (Test-InternetConnection)) {
-            Write-Log -Message "Pre-check: internet mati sebelum attempt $attempt untuk: $Label" -Level WARN
-            $ok = Wait-ForInternet -Reason "Koneksi terputus"
-            if (-not $ok) { return 'cancel' }
-            $attempt--
-            continue
-        }
         try {
             $result = & $Action
             if ($result -eq 'ok' -or $result -eq 'cancel') { return $result }
             $errText = [string]$script:LastError
-            $isNetIssue = ($errText -and (Is-NetworkError -ErrorText $errText)) -or (-not (Test-InternetConnection))
-            if ($result -eq 'fail' -and $isNetIssue) {
+            if ($result -eq 'fail' -and $errText -and (Is-NetworkError -ErrorText $errText)) {
                 Write-Log -Message "Deteksi network error attempt $attempt untuk: $Label" -Level WARN
                 $ok = Wait-ForInternet -Reason "Download '$Label' terputus"
                 if (-not $ok) { return 'cancel' }
@@ -1099,7 +1188,7 @@ function Invoke-WithRetry {
             }
         } catch {
             Write-Log -Message "Attempt $attempt exception: $_" -Level ERROR
-            if ((Is-NetworkError -ErrorText "$_") -or (-not (Test-InternetConnection))) {
+            if (Is-NetworkError -ErrorText "$_") {
                 $ok = Wait-ForInternet -Reason "Exception jaringan"
                 if (-not $ok) { return 'cancel' }
                 $attempt--
@@ -1108,7 +1197,7 @@ function Invoke-WithRetry {
         }
         if ($attempt -le $MaxRetries) {
             Write-Log -Message "Retry $attempt/$MaxRetries untuk: $Label" -Level WARN
-            Start-Sleep -Seconds (1 * $attempt)
+            Start-Sleep -Milliseconds (500 * $attempt)
         }
     }
     return 'fail'
@@ -1129,6 +1218,7 @@ function Get-YtdlpPath {
 }
 
 function Get-YtdlpLocalVersion {
+    if ($script:YtdlpVersion) { return $script:YtdlpVersion }
     try {
         $ytExe = Get-YtdlpPath
         if (-not (Test-Path $ytExe)) { return $null }
@@ -1147,8 +1237,10 @@ function Get-YtdlpLocalVersion {
         try { $proc.Dispose() } catch {}
 
         if ($output -match '^(\d{4}\.\d{2}\.\d{2})') {
-            return $matches[1]
+            $script:YtdlpVersion = $matches[1]
+            return $script:YtdlpVersion
         }
+        $script:YtdlpVersion = $output
         return $output
     } catch {
         Write-Log -Message "Gagal baca versi yt-dlp: $_" -Level WARN
@@ -1192,6 +1284,7 @@ function Compare-YtdlpVersions {
 function Update-Ytdlp {
     param([bool]$ShowProgress = $true)
 
+    $script:YtdlpVersion = $null
     Write-Log -Message "Memulai update yt-dlp..." -Level INFO
 
     $ytPath = Get-YtdlpPath
@@ -1391,13 +1484,15 @@ function Invoke-Download {
         [string]$Label = '',
         [string]$OutputFormat = 'mp4',
         [double]$SlowedRate = 1.0,
-        [bool]$SkipCookies = $false
+        [bool]$SkipCookies = $false,
+        [bool]$UseCookies = $false,
+        [string]$ClientFallback = ''
     )
 
     $labelPrefix = if ($Label) { "$Label   $GL_DOT   " } else { '' }
 
     function Invoke-DownloadProcess {
-        param([bool]$UseCookies)
+        param([bool]$UseCookies, [string]$ClientFallback = '')
 
         $outputPath = Join-Path $script:SaveDir "%(title)s.%(ext)s"
         $ytArgs = New-Object System.Collections.Generic.List[string]
@@ -1410,12 +1505,16 @@ function Invoke-Download {
         $ytArgs.Add("--no-playlist")
         $ytArgs.Add("--no-abort-on-error")
         $ytArgs.Add("--continue")
-        $ytArgs.Add("--extractor-args"); $ytArgs.Add("youtube:player_client=all")
+        $ytArgs.Add("--print"); $ytArgs.Add("after_move:filepath")
+        if ($ClientFallback) {
+            $ytArgs.Add("--extractor-args"); $ytArgs.Add("youtube:player_client=$ClientFallback")
+            Write-Log -Message "Download pakai client fallback: $ClientFallback" -Level DEBUG
+        }
         $ytArgs.Add("--progress-template")
         $ytArgs.Add("download:PROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s")
 
         if ($UseCookies) {
-            $ck = Get-CookieBrowserForYtdlp
+            $ck = Detect-Browser
             if ($ck) {
                 $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($ck)
                 Write-Log -Message "Menggunakan cookies dari browser: $ck" -Level INFO
@@ -1451,12 +1550,12 @@ function Invoke-Download {
             }
         }
 
-        $cmdLine = "yt-dlp " + ($ytArgs | ForEach-Object { '"' + ($_ -replace '(\\*)"', '$1$1\"') + '"' }) -join ' '
+        $cmdLine = "yt-dlp " + (ConvertTo-ArgString -ArgList $ytArgs)
         Write-Log -Message "Command: $cmdLine" -Level CMD
 
         $procInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $procInfo.FileName               = "yt-dlp"
-        $procInfo.Arguments              = $cmdLine.Replace('yt-dlp ', '')
+        $procInfo.FileName               = (if ($script:YtdlpExe) { $script:YtdlpExe } else { 'yt-dlp' })
+        $procInfo.Arguments              = ConvertTo-ArgString -ArgList $ytArgs
         $procInfo.RedirectStandardOutput = $true
         $procInfo.RedirectStandardError  = $true
         $procInfo.UseShellExecute        = $false
@@ -1481,22 +1580,22 @@ function Invoke-Download {
         $readTask = $null
 
         while ($true) {
-            if ($null -eq $readTask) {
-                if ($proc.StandardOutput.EndOfStream) { break }
-                $readTask = $proc.StandardOutput.ReadLineAsync()
-            }
-            $done = $false
-            try { $done = $readTask.Wait(120) } catch { $done = $true }
-
             while ([Console]::KeyAvailable) {
                 $k = [Console]::ReadKey($true)
                 if ($k.Key -eq 'Escape' -or $k.Key -eq 'Q') {
                     $cancelled = $true
-                    try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch { try { $proc.Kill() } catch {} }
+                    try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch {}
+                    if (-not $proc.HasExited) { try { $proc.Kill() } catch {} }
                     break
                 }
             }
             if ($cancelled) { break }
+            if ($null -eq $readTask) {
+                if ($proc.HasExited) { break }
+                $readTask = $proc.StandardOutput.ReadLineAsync()
+            }
+            $done = $false
+            try { $done = $readTask.Wait(120) } catch { $done = $true }
             if (-not $done) { continue }
 
             $line = $null
@@ -1504,6 +1603,10 @@ function Invoke-Download {
             $readTask = $null
             if ($null -eq $line) { if ($proc.HasExited) { break } else { continue } }
             if (-not $line) { continue }
+
+            if ($OutputFormat -ne 'mp3' -and $line -match '^[A-Za-z]:\\|^\\\\') {
+                $script:LastDownloadedFile = $line.Trim()
+            }
 
             if ($line -match 'PROG\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$') {
                 $pctStr   = $matches[1].Trim() -replace '%',''
@@ -1615,8 +1718,8 @@ function Invoke-Download {
         return @{ ExitCode = $exitCode; StdErr = $errText; Cancelled = $false }
     }
 
-    $useCookies = (-not $SkipCookies)
-    $result = Invoke-DownloadProcess -UseCookies $useCookies
+    $useCookies = $UseCookies -and (-not $SkipCookies)
+    $result = Invoke-DownloadProcess -UseCookies $useCookies -ClientFallback $ClientFallback
 
     if ($result.Cancelled) {
         Write-Center -Row $StatsRow -Text "$FG_ORANGE${labelPrefix}dibatalkan$RESET"
@@ -1632,20 +1735,21 @@ function Invoke-Download {
             return 'fail'
         }
 
-        Start-Sleep -Milliseconds 500
-
         $audioExts = @('.m4a','.opus','.webm','.ogg','.wav','.aac','.flac','.mka','.mp3','.mp4')
         $imageExts = @('.jpg','.jpeg','.png','.webp')
         $rawAudioFile = $null
         $thumbFile    = $null
 
-        $allMatches = Get-ChildItem -Path $script:SaveDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -eq $tempBase -or $_.Name -like "$tempBase.*" } |
-            Sort-Object LastWriteTime -Descending
-        foreach ($f in $allMatches) {
-            $ext = $f.Extension.ToLower()
-            if ($audioExts -contains $ext -and -not $rawAudioFile) { $rawAudioFile = $f }
-            elseif ($imageExts -contains $ext -and -not $thumbFile) { $thumbFile = $f }
+        # Deterministik: poll singkat sampai file muncul, bukan sleep tetap
+        for ($w = 0; $w -lt 20 -and -not $rawAudioFile; $w++) {
+            $allMatches = Get-ChildItem -Path $script:SaveDir -File -Filter "$tempBase.*" -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending
+            foreach ($f in $allMatches) {
+                $ext = $f.Extension.ToLower()
+                if ($audioExts -contains $ext -and -not $rawAudioFile) { $rawAudioFile = $f }
+                elseif ($imageExts -contains $ext -and -not $thumbFile) { $thumbFile = $f }
+            }
+            if (-not $rawAudioFile) { Start-Sleep -Milliseconds 100 }
         }
 
         $dlTitle  = ''
@@ -1684,6 +1788,7 @@ function Invoke-Download {
         if ($finalMp3) {
             $doneMsg = if ($SlowedRate -lt 1.0) { "selesai (${rateText}x)" } else { "selesai" }
             Write-Center -Row $StatsRow -Text "$FG_GREEN${labelPrefix}$GL_CHECK $doneMsg$RESET"
+            $script:LastDownloadedFile = $finalMp3
             return 'ok'
         }
         Write-Center -Row $StatsRow -Text "$FG_RED${labelPrefix}$GL_CROSS konversi gagal$RESET"
@@ -1714,14 +1819,32 @@ function Invoke-Download {
     if ($isCookieError -and $useCookies) {
         Write-Log -Message "Cookies browser gagal, retry tanpa cookies..." -Level WARN
         Write-Center -Row $StatsRow -Text "$FG_YELLOW${labelPrefix}cookies browser terkunci, coba tanpa cookies...$RESET"
-        Start-Sleep -Milliseconds 300
-        $result = Invoke-DownloadProcess -UseCookies $false
+        $result = Invoke-DownloadProcess -UseCookies $false -ClientFallback $ClientFallback
         if ($result.Cancelled) {
             Write-Center -Row $StatsRow -Text "$FG_ORANGE${labelPrefix}dibatalkan$RESET"
             return 'cancel'
         }
         if ($result.ExitCode -eq 0) {
             Write-Log -Message "Download selesai setelah retry tanpa cookies" -Level INFO
+            if ($OutputFormat -eq 'mp3') {
+                $ppResult = Complete-Mp3PostDownload
+                return $ppResult
+            }
+            return 'ok'
+        }
+        $errText = [string]$result.StdErr
+    }
+
+    if (-not $useCookies -and (Detect-Browser) -and ((Classify-Error -ErrorText $errText) -eq 'auth')) {
+        Write-Log -Message "Download butuh auth, retry dengan cookies..." -Level WARN
+        Write-Center -Row $StatsRow -Text "$FG_YELLOW${labelPrefix}butuh login, coba dengan cookies browser...$RESET"
+        $result = Invoke-DownloadProcess -UseCookies $true -ClientFallback $ClientFallback
+        if ($result.Cancelled) {
+            Write-Center -Row $StatsRow -Text "$FG_ORANGE${labelPrefix}dibatalkan$RESET"
+            return 'cancel'
+        }
+        if ($result.ExitCode -eq 0) {
+            Write-Log -Message "Download selesai setelah retry dengan cookies" -Level INFO
             if ($OutputFormat -eq 'mp3') {
                 $ppResult = Complete-Mp3PostDownload
                 return $ppResult
@@ -1768,8 +1891,9 @@ function Show-WelcomeScreen {
         Write-Center -Row ($folderRow + 4) -Text "$FG_ORANGE$GL_BULLET$RESET  $FG_GRAY$prefText$RESET"
     }
 
-    # Tampilkan versi yt-dlp di welcome screen
-    $ytdlpVer = Get-YtdlpLocalVersion
+    # Tampilkan versi yt-dlp di welcome screen (pakai cache, jangan re-spawn proses)
+    $ytdlpVer = $script:YtdlpVersion
+    if (-not $ytdlpVer) { $ytdlpVer = Get-YtdlpLocalVersion }
     if ($ytdlpVer -and (($folderRow + 5) -lt ($h - 1))) {
         Write-Center -Row ($folderRow + 5) -Text "$FG_DIM yt-dlp v$ytdlpVer   $GL_DOT   ketik 'update' untuk cek update$RESET"
     }
@@ -2151,45 +2275,28 @@ function Show-SettingsScreen {
 # ============================================
 # SCREEN 2: FETCHING (FAST - NO START-JOB)
 # ============================================
-function Invoke-FetchJson {
+function Invoke-FastExtract {
     param([string]$URL, [string]$Message, [bool]$Flat)
 
-    if (-not (Test-InternetConnection)) {
-        $ok = Wait-ForInternet -Reason 'Tidak ada koneksi internet'
-        if (-not $ok) { return $null }
+    Reset-Perf
+    $p = $script:Perf
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $p.total = 0
+
+    $norm = Normalize-Url -Url $URL
+    $cached = Get-CachedMeta -Url $norm -Flat $Flat
+    if ($null -ne $cached) {
+        $ce = $script:MetaCache[$norm]
+        if ($ce) {
+            $script:NeedsCookies = $script:NeedsCookies -or $ce.Cookies
+            if ($ce.Tier) { $script:LastClientTier = $ce.Tier }
+        }
+        $p.total = [int]$sw.ElapsedMilliseconds
+        Trace-Perf -Op 'fetch (cache hit)'
+        return $cached
     }
 
-    $maxTries = 3
-    for ($try = 1; $try -le $maxTries; $try++) {
-        $result = Invoke-FetchJsonFast -URL $URL -Message $Message -Flat $Flat
-        if ($null -ne $result) { return $result }
-
-        $err = [string]$script:LastError
-        if ($err -and (Is-NetworkError -ErrorText $err)) {
-            Write-Log -Message "Fetch gagal karena network (try $try)" -Level WARN
-            $ok = Wait-ForInternet -Reason 'Fetch info gagal, koneksi bermasalah'
-            if (-not $ok) { return $null }
-            continue
-        }
-
-        if (-not (Test-InternetConnection)) {
-            $ok = Wait-ForInternet -Reason 'Koneksi terputus saat fetch'
-            if (-not $ok) { return $null }
-            continue
-        }
-
-        return $null
-    }
-    return $null
-}
-
-# VERSI CEPAT: Menggunakan System.Diagnostics.Process langsung (bukan Start-Job)
-# Start-Job spawn seluruh PowerShell process baru -> lambat (2-5s overhead)
-# Process langsung -> instant start, langsung dapat output via async pipe
-function Invoke-FetchJsonFast {
-    param([string]$URL, [string]$Message, [bool]$Flat)
-
-    Write-Log -Message "Fetch info (fast): $URL (flat=$Flat)" -Level INFO
+    Write-Log -Message "Fetch info: $URL (flat=$Flat)" -Level INFO
     $script:LastError = ''
 
     Clear-Screen
@@ -2197,109 +2304,195 @@ function Invoke-FetchJsonFast {
 
     $h = Get-TermHeight
     $centerRow = [Math]::Floor($h / 2)
-    $flatArg = if ($Flat) { '--flat-playlist' } else { '--no-playlist' }
-
-    $ck = Get-CookieBrowserForYtdlp
-
-    # Build arguments untuk yt-dlp
-    $ytArgs = New-Object System.Collections.Generic.List[string]
-    $ytArgs.Add("-J")
-    $ytArgs.Add($flatArg)
-    $ytArgs.Add("--extractor-args"); $ytArgs.Add("youtube:player_client=all")
-    $ytArgs.Add("--no-warnings")
-
-    if ($ck) {
-        $ytArgs.Add("--cookies-from-browser"); $ytArgs.Add($ck)
-        Write-Log -Message "Fetch menggunakan cookies dari: $ck" -Level DEBUG
-    }
-
-    $ytArgs.Add($URL)
-
-    # Jalankan yt-dlp langsung sebagai Process (bukan Start-Job)
-    $procInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $procInfo.FileName               = "yt-dlp"
-    $procInfo.Arguments              = ($ytArgs | ForEach-Object { '"' + ($_ -replace '(\\*)"', '$1$1\"') + '"' }) -join ' '
-    $procInfo.CreateNoWindow         = $true
-    $procInfo.UseShellExecute        = $false
-    $procInfo.RedirectStandardOutput = $true
-    $procInfo.RedirectStandardError  = $true
-    $procInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-
     $shortUrl = Limit-Text -Text $URL -Max ([Math]::Max(20, (Get-TermWidth) - 8))
     Write-Center -Row ($centerRow + 2) -Text "$FG_DIM$shortUrl$RESET"
 
-    try {
-        $proc = [System.Diagnostics.Process]::Start($procInfo)
-    } catch {
-        $script:LastError = "Gagal start yt-dlp: $_"
-        Write-Log -Message $script:LastError -Level ERROR
-        return $null
-    }
+    $exe = if ($script:YtdlpExe) { $script:YtdlpExe } else { 'yt-dlp' }
+    $clientTiers = @('', 'android', 'all')
+    $tier = 0
+    $useCookies = $false
+    $tryCount = 0
+    $maxTries = 6
+    $netRetries = 0
+    $unknownRetries = 0
+    $spinIdx = 0
 
-    # Baca stdout dan stderr secara async untuk menghindari deadlock
-    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-    $stderrTask = $proc.StandardError.ReadToEndAsync()
+    while ($tryCount -lt $maxTries) {
+        $tryCount++
+        $flatArg = if ($Flat) { '--flat-playlist' } else { '--no-playlist' }
 
-    $i = 0
-    $cancelled = $false
-
-    while (-not $proc.HasExited) {
-        $spin = $script:SpinChars[$i % 10]
-        Write-Center -Row $centerRow -Text "$FG_CYAN$spin$RESET  $FG_WHITE$Message$RESET  ${FG_DIM}(esc batal)$RESET"
-
-        while ([Console]::KeyAvailable) {
-            $k = [Console]::ReadKey($true)
-            if ($k.Key -eq 'Escape') { $cancelled = $true; break }
+        $ytArgs = New-Object System.Collections.Generic.List[string]
+        $ytArgs.Add('-J')
+        $ytArgs.Add($flatArg)
+        $ytArgs.Add('--no-warnings')
+        $ytArgs.Add('--socket-timeout'); $ytArgs.Add('10')
+        if ($clientTiers[$tier]) {
+            $ytArgs.Add('--extractor-args'); $ytArgs.Add("youtube:player_client=$($clientTiers[$tier])")
         }
-        if ($cancelled) { break }
+        if ($useCookies) {
+            $ck = Detect-Browser
+            if ($ck) {
+                $ytArgs.Add('--cookies-from-browser'); $ytArgs.Add($ck)
+                Write-Log -Message "Fetch pakai cookies fallback: $ck" -Level DEBUG
+            } else {
+                $useCookies = $false
+            }
+        }
+        $ytArgs.Add($URL)
 
-        Start-Sleep -Milliseconds 50
-        $i++
-    }
+        $procInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $procInfo.FileName               = $exe
+        $procInfo.Arguments              = ConvertTo-ArgString -ArgList $ytArgs
+        $procInfo.CreateNoWindow         = $true
+        $procInfo.UseShellExecute        = $false
+        $procInfo.RedirectStandardOutput = $true
+        $procInfo.RedirectStandardError  = $true
+        $procInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
 
-    if ($cancelled) {
-        try { $proc.Kill() } catch {}
-        try { $proc.WaitForExit(3000) } catch {}
+        $tSpawn = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            $proc = [System.Diagnostics.Process]::Start($procInfo)
+        } catch {
+            $script:LastError = "Gagal start yt-dlp: $_"
+            Write-Log -Message $script:LastError -Level ERROR
+            break
+        }
+        $p.spawn = [int]$tSpawn.ElapsedMilliseconds
+
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+
+        $tExtract = [System.Diagnostics.Stopwatch]::StartNew()
+        $cancelled = $false
+        $lastDraw = [DateTime]::MinValue
+
+        while (-not $proc.HasExited) {
+            while ([Console]::KeyAvailable) {
+                $k = [Console]::ReadKey($true)
+                if ($k.Key -eq 'Escape') { $cancelled = $true; break }
+            }
+            if ($cancelled) { break }
+            $now = Get-Date
+            if (($now - $lastDraw).TotalMilliseconds -ge 150) {
+                $lastDraw = $now
+                $spin = $script:SpinChars[$spinIdx % 10]
+                Write-Center -Row $centerRow -Text "$FG_CYAN$spin$RESET  $FG_WHITE$Message$RESET  ${FG_DIM}(esc batal)$RESET"
+            }
+            $spinIdx++
+            Start-Sleep -Milliseconds 50
+        }
+
+        if ($cancelled) {
+            try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch {}
+            if (-not $proc.HasExited) { try { $proc.Kill() } catch {} }
+            try { $proc.WaitForExit(3000) } catch {}
+            try { $proc.Close() } catch {}
+            try { $proc.Dispose() } catch {}
+            Write-Log -Message "Fetch dibatalkan user" -Level WARN
+            return $null
+        }
+
+        $proc.WaitForExit()
+        $p.extraction = [int]$tExtract.ElapsedMilliseconds
+
+        $stdout = ''
+        $stderr = ''
+        try { $stdout = $stdoutTask.Result } catch {}
+        try { $stderr = $stderrTask.Result } catch {}
+        $exitCode = $proc.ExitCode
         try { $proc.Close() } catch {}
         try { $proc.Dispose() } catch {}
-        Write-Log -Message "Fetch dibatalkan user" -Level WARN
-        return $null
-    }
 
-    # Tunggu sampai semua output terbaca (stdout + stderr harus selesai)
-    $proc.WaitForExit()
-    $stdout = ''
-    $stderr = ''
-    try { $stdout = $stdoutTask.Result } catch {}
-    try { $stderr = $stderrTask.Result } catch {}
-
-    $exitCode = $proc.ExitCode
-    try { $proc.Close() } catch {}
-    try { $proc.Dispose() } catch {}
-
-    if ($exitCode -ne 0 -and -not $stdout) {
-        $script:LastError = if ($stderr) { $stderr } else { "yt-dlp exit code $exitCode" }
-        Write-Log -Message "Fetch gagal: $script:LastError" -Level ERROR
-        return $null
-    }
-
-    if (-not $stdout) {
-        $script:LastError = 'yt-dlp tidak mengembalikan data'
-        Write-Log -Message "Fetch gagal: $script:LastError" -Level ERROR
-        return $null
-    }
-
-    $script:LastError = ''
-    try { return ($stdout | ConvertFrom-Json) } catch {
-        # Coba extract JSON dari output yang mungkin ada noise
-        $jsonMatch = [regex]::Match($stdout, '\{[\s\S]*\}')
-        if ($jsonMatch.Success) {
-            try { return ($jsonMatch.Value | ConvertFrom-Json) } catch {}
+        if ($exitCode -eq 0 -and $stdout) {
+            $tParse = [System.Diagnostics.Stopwatch]::StartNew()
+            $obj = $null
+            try { $obj = $stdout | ConvertFrom-Json } catch {}
+            if ($null -eq $obj) {
+                $jsonMatch = [regex]::Match($stdout, '\{[\s\S]*\}')
+                if ($jsonMatch.Success) {
+                    try { $obj = $jsonMatch.Value | ConvertFrom-Json } catch {}
+                }
+            }
+            $p.parse = [int]$tParse.ElapsedMilliseconds
+            if ($null -ne $obj) {
+                $p.total = [int]$sw.ElapsedMilliseconds
+                $script:LastError = ''
+                $script:NeedsCookies = $script:NeedsCookies -or $useCookies
+                $script:LastClientTier = $clientTiers[$tier]
+                Set-CachedMeta -Url $norm -Data $obj -Flat $Flat -Cookies $useCookies -Tier $clientTiers[$tier]
+                Trace-Perf -Op 'fetch ok'
+                return $obj
+            }
+            $script:LastError = 'Gagal parse JSON dari yt-dlp'
+            Write-Log -Message "Parse JSON gagal" -Level ERROR
+            if ($tryCount -lt $maxTries) { continue }
+            break
         }
-        $script:LastError = 'Gagal parse JSON dari yt-dlp'
-        Write-Log -Message "Parse JSON gagal: $_" -Level ERROR
-        return $null
+
+        $script:LastError = if ($stderr) { $stderr } else { "yt-dlp exit code $exitCode" }
+        Write-Log -Message "Fetch gagal (try $tryCount): $(($script:LastError -split "`n" | Where-Object { $_ } | Select-Object -First 2) -join ' | ')" -Level WARN
+
+        $errType = Classify-Error -ErrorText $script:LastError
+        $isNet = Is-NetworkError -ErrorText $script:LastError
+
+        if ($errType -eq 'auth' -and -not $useCookies -and (Detect-Browser)) {
+            $useCookies = $true
+            $p.cookieFallback = $true
+            $p.fallbackReason = 'auth'
+            Write-Log -Message "Error auth, fallback ke cookies browser" -Level WARN
+            continue
+        }
+        if ($errType -eq 'auth' -and $useCookies -and -not $p.cookieRetried) {
+            $p.cookieRetried = $true
+            $useCookies = $false
+            $p.fallbackReason = 'auth-no-cookies'
+            Write-Log -Message "Auth masih gagal dengan cookies, retry tanpa cookies" -Level WARN
+            continue
+        }
+        if ($errType -eq 'auth') {
+            Write-Log -Message "Error auth tanpa opsi cookies, tidak retry" -Level WARN
+            break
+        }
+        if ($script:LastError -imatch 'georestricted|geo.?restrict|not available in your country|blocked in your') {
+            if (-not $useCookies -and (Detect-Browser)) {
+                $useCookies = $true
+                $p.cookieFallback = $true
+                $p.fallbackReason = 'geo'
+                Write-Log -Message "Geo-block, coba cookies browser" -Level WARN
+                continue
+            }
+            Write-Log -Message "Geo-block permanen" -Level WARN
+            break
+        }
+        if (Test-PermanentError -ErrorText $script:LastError) {
+            Write-Log -Message "Error permanen, tidak retry" -Level WARN
+            break
+        }
+        if ($isNet) {
+            if ($netRetries -ge 3) { break }
+            $netRetries++
+            $p.fallbackReason = 'network'
+            $ok = Wait-ForInternet -Reason 'Fetch info gagal, koneksi bermasalah'
+            if (-not $ok) { return $null }
+            $p.retries++
+            continue
+        }
+        if ($tier -lt ($clientTiers.Count - 1)) {
+            $tier++
+            $p.fallbackReason = "client:$($clientTiers[$tier])"
+            $p.retries++
+            Write-Log -Message "Extractor error, fallback client: $($clientTiers[$tier])" -Level WARN
+            continue
+        }
+        if ($unknownRetries -ge 1) { break }
+        $unknownRetries++
+        $p.retries++
+        Start-Sleep -Milliseconds (400 * $tryCount)
     }
+
+    $p.total = [int]$sw.ElapsedMilliseconds
+    Trace-Perf -Op 'fetch fail'
+    return $null
 }
 
 # ============================================
@@ -2522,7 +2715,9 @@ function Show-DownloadScreen {
         [string]$URL,
         [bool]$FullFeature = $true,
         [bool]$ForceAudio = $false,
-        [string]$SelectedOutputFormat = ''
+        [string]$SelectedOutputFormat = '',
+        [bool]$UseCookies = $false,
+        [string]$ClientFallback = ''
     )
 
     $finalOutputFormat = if ($ForceAudio) { 'mp3' } elseif ($SelectedOutputFormat) { $SelectedOutputFormat } else { 'mp4' }
@@ -2548,7 +2743,7 @@ function Show-DownloadScreen {
     Write-PanelLine -Row ($centerRow - 3) -Col $m.Col -Width $m.Width -Text "$FG_WHITE$titleText$RESET"
 
     if ($finalOutputFormat -eq 'mp3') {
-        return Invoke-Download -URL $URL -FormatString 'bestaudio/best' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp3' -SlowedRate $effectiveSlowedRate
+        return Invoke-Download -URL $URL -FormatString 'bestaudio/best' -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp3' -SlowedRate $effectiveSlowedRate -UseCookies $UseCookies -ClientFallback $ClientFallback
     }
 
     if ($FullFeature) {
@@ -2558,12 +2753,12 @@ function Show-DownloadScreen {
         $vid = $resolution.FormatID
         $audioID = if ($audio.FormatID) { $audio.FormatID } else { "bestaudio" }
         $fString = "$vid+$audioID/$vid+bestaudio/best"
-        return Invoke-Download -URL $URL -FormatString $fString -SubLang $subtitle.Lang -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
+        return Invoke-Download -URL $URL -FormatString $fString -SubLang $subtitle.Lang -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4' -UseCookies $UseCookies -ClientFallback $ClientFallback
     } else {
         $resolution = $script:Resolutions[$script:SelAudio]
         $vid = $resolution.FormatID
         $fString = "$vid+bestaudio/$vid/best"
-        return Invoke-Download -URL $URL -FormatString $fString -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4'
+        return Invoke-Download -URL $URL -FormatString $fString -BarRow $centerRow -StatsRow ($centerRow + 2) -OutputFormat 'mp4' -UseCookies $UseCookies -ClientFallback $ClientFallback
     }
 }
 
@@ -2571,7 +2766,7 @@ function Show-DownloadScreen {
 # SCREEN 4b: PLAYLIST
 # ============================================
 function Show-PlaylistScreen {
-    param($Info, [bool]$ForceAudio = $false)
+    param($Info, [bool]$ForceAudio = $false, [bool]$UseCookies = $false, [string]$ClientFallback = '')
     $entries = @($Info.entries | Where-Object { $_ })
     if ($entries.Count -eq 0) { return }
 
@@ -2675,8 +2870,9 @@ function Show-PlaylistScreen {
                 continue
             }
 
+            $script:LastDownloadedFile = $null
             $res = Invoke-WithRetry -Action {
-                Invoke-Download -URL $vurl -FormatString $fString -SubLang $null -BarRow $barRow -StatsRow $statsRow -Label $label -OutputFormat $outFmt -SlowedRate $playlistSlowedRate
+                Invoke-Download -URL $vurl -FormatString $fString -SubLang $null -BarRow $barRow -StatsRow $statsRow -Label $label -OutputFormat $outFmt -SlowedRate $playlistSlowedRate -UseCookies $UseCookies -ClientFallback $ClientFallback
             } -Label $label
 
             if ($res -eq 'ok') { $status[$i] = 2; $okCount++ }
@@ -2859,6 +3055,28 @@ function Check-Update {
     return $false
 }
 
+# =====================================================
+# UPDATE CHECK CACHE (jangan blokir startup tiap kali)
+# =====================================================
+$script:LastCheckFile = Join-Path $script:ConfigDir 'last_check.txt'
+
+function Test-UpdateCheckDue {
+    param([int]$Hours = 12)
+    if (-not (Test-Path $script:LastCheckFile)) { return $true }
+    try {
+        $raw = (Get-Content $script:LastCheckFile -Raw).Trim().TrimStart([char]0xFEFF)
+        $t = [datetime]::ParseExact($raw, 'o', $null)
+        return (((Get-Date) - $t).TotalHours -ge $Hours)
+    } catch { return $true }
+}
+
+function Set-UpdateCheckTime {
+    try {
+        if (-not (Test-Path $script:ConfigDir)) { New-Item -ItemType Directory -Path $script:ConfigDir -Force | Out-Null }
+        [System.IO.File]::WriteAllText($script:LastCheckFile, (Get-Date).ToString('o'), [System.Text.Encoding]::UTF8)
+    } catch {}
+}
+
 function Download-FileWithProgress {
     param(
         [string]$Url,
@@ -3011,27 +3229,24 @@ try {
     Write-Log -Message "Settings loaded. SaveDir: $script:SaveDir, Format: $($script:Settings.Format)" -Level INFO
 
     if (-not (Test-Dependencies)) { exit }
+    $script:YtdlpExe = Get-YtdlpPath
 
-    # Cek update skrip
-    if ($script:Settings.AutoUpdate) {
+    # Cek update (cached: hanya jika belum dicek dalam X jam) - tidak blokir startup lama
+    if ($script:Settings.AutoUpdate -and (Test-UpdateCheckDue -Hours 12)) {
         [void](Check-Update)
-    }
-
-    # AUTO-CHECK update yt-dlp saat startup (non-blocking visual, langsung prompt)
-    if ($script:Settings.AutoUpdate) {
-        Write-Log -Message "Checking yt-dlp update at startup..." -Level INFO
         try {
             $ytdlpLocalVer = Get-YtdlpLocalVersion
             $ytdlpRemoteVer = Get-YtdlpRemoteVersion
             if ($ytdlpLocalVer -and $ytdlpRemoteVer -and (Compare-YtdlpVersions -Local $ytdlpLocalVer -Remote $ytdlpRemoteVer)) {
                 Write-Log -Message "yt-dlp update available: $ytdlpLocalVer -> $ytdlpRemoteVer" -Level INFO
                 [void](Show-YtdlpUpdatePrompt -CurrentVersion $ytdlpLocalVer -NewVersion $ytdlpRemoteVer)
-            } else {
-                Write-Log -Message "yt-dlp is up to date ($ytdlpLocalVer)" -Level INFO
             }
         } catch {
             Write-Log -Message "yt-dlp update check failed: $_" -Level DEBUG
         }
+        Set-UpdateCheckTime
+    } else {
+        Write-Log -Message "Update check di-skip (baru dicek / auto-update off)" -Level DEBUG
     }
 
     $running = $true
@@ -3066,7 +3281,8 @@ try {
             continue
         }
 
-        $info = Invoke-FetchJson -URL $url -Message 'Mengambil informasi...' -Flat $true
+        $flat = Test-IsPlaylistUrl -Url $url
+        $info = Invoke-FastExtract -URL $url -Message 'Mengambil informasi...' -Flat $flat
         if (-not $info) {
             $errText = if ($script:LastError) { $script:LastError } else { '' }
             $errType = Classify-Error -ErrorText $errText
@@ -3082,13 +3298,25 @@ try {
         }
 
         $isPlaylist = ($info._type -eq 'playlist') -and ($info.entries) -and (@($info.entries).Count -gt 1)
+
+        # URL tidak terlihat playlist tapi hasilnya playlist -> fetch ulang flat (sekali saja)
+        if ($isPlaylist -and -not $flat) {
+            Write-Log -Message "Deteksi playlist dari hasil fetch, ambil ulang flat" -Level INFO
+            $info = Invoke-FastExtract -URL $url -Message 'Membaca daftar playlist...' -Flat $true
+            if (-not $info) {
+                $retry = Show-ErrorScreen -Message "Gagal membaca playlist"
+                if (-not $retry) { $running = $false; break }
+                continue
+            }
+        }
+
         $isYTMusic = Is-YouTubeMusicUrl -Url $url
         $isGlobalMp3 = ($script:Settings.Format -eq 'mp3')
         $isFullFeature = Is-FullFeaturePlatform -Url $url
 
         if ($isPlaylist) {
             $isPlaylistAudio = $isYTMusic -or $isGlobalMp3
-            Show-PlaylistScreen -Info $info -ForceAudio $isPlaylistAudio
+            Show-PlaylistScreen -Info $info -ForceAudio $isPlaylistAudio -UseCookies $script:NeedsCookies -ClientFallback $script:LastClientTier
             continue
         }
 
@@ -3098,7 +3326,7 @@ try {
             if ($target.webpage_url) { $vurl = [string]$target.webpage_url }
             elseif ($target.url -and ([string]$target.url -match '^https?://')) { $vurl = [string]$target.url }
             elseif ($target.id) { $vurl = "https://www.youtube.com/watch?v=$($target.id)" }
-            $info = Invoke-FetchJson -URL $vurl -Message 'Membaca format video...' -Flat $false
+            $info = Invoke-FastExtract -URL $vurl -Message 'Membaca format video...' -Flat $false
             if (-not $info) {
                 $retry = Show-ErrorScreen -Message "Gagal membaca format video"
                 if (-not $retry) { $running = $false; break }
@@ -3120,7 +3348,7 @@ try {
             $savedFormat = $script:Settings.Format
             $script:Settings.Format = 'mp3'
             $result = Invoke-WithRetry -Action {
-                Show-DownloadScreen -URL $url -FullFeature $false -ForceAudio $true
+                Show-DownloadScreen -URL $url -FullFeature $false -ForceAudio $true -UseCookies $script:NeedsCookies -ClientFallback $script:LastClientTier
             } -Label "Download audio $url"
 
             $errMsg = ""
@@ -3135,8 +3363,12 @@ try {
             }
 
             if ($result -eq 'ok') {
-                $latestFile = Get-LatestDownloadedFile -Dir $script:SaveDir
-                if ($latestFile) { Invoke-AutoplayMedia -FilePath $latestFile.FullName }
+                $latestFile = $script:LastDownloadedFile
+                if (-not $latestFile -or -not (Test-Path -LiteralPath $latestFile)) {
+                    $lf = Get-LatestDownloadedFile -Dir $script:SaveDir
+                    $latestFile = if ($lf) { $lf.FullName } else { $null }
+                }
+                if ($latestFile) { Invoke-AutoplayMedia -FilePath $latestFile }
                 Record-PlatformSuccess -Platform $detectedPlatform
             } elseif ($result -eq 'fail') {
                 Record-PlatformFail -Platform $detectedPlatform -Reason 'Download gagal' -ErrorText $script:LastError
@@ -3164,13 +3396,17 @@ try {
         }
 
         $result = Invoke-WithRetry -Action {
-            Show-DownloadScreen -URL $url -FullFeature $isFullFeature -SelectedOutputFormat $selectedOutputFmt
+            Show-DownloadScreen -URL $url -FullFeature $isFullFeature -SelectedOutputFormat $selectedOutputFmt -UseCookies $script:NeedsCookies -ClientFallback $script:LastClientTier
         } -Label "Download $url"
 
         if ($result -eq 'ok') {
             Record-PlatformSuccess -Platform $detectedPlatform
-            $latestFile = Get-LatestDownloadedFile -Dir $script:SaveDir
-            if ($latestFile) { Invoke-AutoplayMedia -FilePath $latestFile.FullName }
+            $latestFile = $script:LastDownloadedFile
+            if (-not $latestFile -or -not (Test-Path -LiteralPath $latestFile)) {
+                $lf = Get-LatestDownloadedFile -Dir $script:SaveDir
+                $latestFile = if ($lf) { $lf.FullName } else { $null }
+            }
+            if ($latestFile) { Invoke-AutoplayMedia -FilePath $latestFile }
         } elseif ($result -eq 'fail') {
             Record-PlatformFail -Platform $detectedPlatform -Reason 'Download gagal' -ErrorText $script:LastError
         }
