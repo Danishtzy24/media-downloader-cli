@@ -2308,7 +2308,7 @@ function Invoke-FastExtract {
     Write-Center -Row ($centerRow + 2) -Text "$FG_DIM$shortUrl$RESET"
 
     $exe = if ($script:YtdlpExe) { $script:YtdlpExe } else { 'yt-dlp' }
-    $clientTiers = @('', 'android', 'all')
+    $clientTiers = @('android_vr', 'android', '', 'all')
     $tier = 0
     $useCookies = $false
     $tryCount = 0
