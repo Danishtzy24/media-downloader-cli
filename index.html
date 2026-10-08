@@ -1,652 +1,456 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Media Downloader — PowerShell CLI</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg: #09090b;
-      --card: #141416;
-      --border: #222225;
-      --fg: #f4f4f5;
-      --dim: #71717a;
-      --blue-accent: #6496ff;
-    }
-    body {
-      background-color: var(--bg);
-      font-family: 'Inter', sans-serif;
-      color: var(--fg);
-      overflow-x: hidden;
-    }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 9999px; }
-    ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
-    .cursor-blink {
-      display: inline-block; width: 8px; height: 17px;
-      background-color: var(--fg);
-      animation: blink 1s steps(1) infinite;
-      vertical-align: middle;
-    }
-    @keyframes blink { 50% { opacity: 0; } }
-    .grid-bg {
-      background-size: 40px 40px;
-      background-image: linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-                        linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-    }
-    @keyframes slideIn { from { transform: translateY(1rem); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    .animate-toast { animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-    .feature-card {
-      transition: all 0.2s ease;
-      border: 1px solid rgba(34, 34, 37, 0.6);
-    }
-    .feature-card:hover {
-      border-color: rgba(34, 34, 37, 1);
-      background: rgba(20, 20, 22, 0.6);
-      transform: translateY(-2px);
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media Downloader: download video dan audio lewat PowerShell</title>
+<meta name="description" content="CLI berbasis PowerShell untuk mengunduh media dari YouTube, TikTok, Twitter/X, Instagram, Bstation, dan 1000+ situs lain. Khusus Windows.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fafafa' text-anchor='middle'%3EM_%3C/text%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#09090b;--s1:#111113;--s2:#18181b;--bd:#27272a;--bd2:#3f3f46;
+  --tx:#fafafa;--mu:#a1a1aa;--ac:#6496ff;--ok:#34d399;--er:#f87171;
+  --r1:8px;--r2:12px;--fast:150ms;--base:240ms;--slow:400ms;--ease:cubic-bezier(.2,.7,.2,1);
+  --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:88px;color-scheme:dark}
+body{background:var(--bg);color:var(--tx);font:15px/1.6 Inter,system-ui,sans-serif;font-feature-settings:"cv11","calt";letter-spacing:-.003em;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+::selection{background:rgba(100,150,255,.3)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:99px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--bd2)}
+code,.mono{font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+section{padding:clamp(56px,8vw,96px) 0;border-top:1px solid var(--bd)}
+h2{font-size:clamp(26px,3.4vw,34px);line-height:1.15;letter-spacing:-.03em;font-weight:700;text-wrap:balance}
+.lead{color:var(--mu);margin-top:12px;max-width:56ch;line-height:1.65;text-wrap:pretty}
+
+/* header */
+header{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid transparent;transition:border-color var(--base)}
+header.scrolled{border-color:var(--bd)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;height:72px;position:relative}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em}
+.logo b{width:32px;height:32px;border-radius:var(--r1);background:var(--s2);border:1px solid var(--bd);display:grid;place-items:center;font:700 13px var(--mono)}
+nav{display:flex;gap:4px;align-items:center}
+nav a{padding:10px 12px;border-radius:var(--r1);color:var(--mu);font-size:14px;transition:color var(--fast),background var(--fast)}
+nav a:hover{color:var(--tx);background:var(--s2)}
+.menu{display:none;min-width:44px;min-height:44px;background:none;border:1px solid var(--bd);border-radius:var(--r1);color:var(--tx);cursor:pointer;font:500 14px Inter;padding:0 14px}
+
+/* buttons */
+.btn{min-height:44px;padding:0 18px;border-radius:var(--r1);border:1px solid var(--bd);background:var(--s2);color:var(--tx);font:600 14px Inter,sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;transition:background var(--fast),border-color var(--fast),color var(--fast),transform var(--fast)}
+.btn:hover{border-color:var(--bd2);background:#1f1f23}
+.btn:active{transform:scale(.98)}
+.btn.p{background:var(--tx);color:#09090b;border-color:var(--tx)}
+.btn.p:hover{background:#e4e4e7}
+.btn.ok,.btn.ok:hover{border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.1);color:var(--ok)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;transform:none}
+.btn.sm{min-height:36px;padding:0 12px;font-size:13px}
+
+/* hero */
+.hero{display:grid;gap:48px;padding:48px 0 88px;align-items:center}
+.badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--mu);border:1px solid var(--bd);border-radius:999px;padding:4px 12px;margin-bottom:20px}
+.badge i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+h1{font-size:clamp(36px,5.6vw,56px);line-height:1.04;letter-spacing:-.04em;font-weight:700;max-width:16ch;text-wrap:balance}
+.hero p.lead{font-size:clamp(16px,1.6vw,18px);margin-top:24px}
+.hero>div:first-child>*{animation:rise .7s var(--ease) backwards}
+.hero>div:first-child>:nth-child(2){animation-delay:70ms}
+.hero>div:first-child>:nth-child(3){animation-delay:140ms}
+.hero>div:first-child>:nth-child(4){animation-delay:210ms}
+.hero>div:first-child>:nth-child(5){animation-delay:280ms}
+.hero>div:last-child{animation:rise .8s var(--ease) 300ms backwards}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}}
+#stateLbl.sw{animation:lbl var(--base) var(--ease)}
+@keyframes lbl{from{opacity:0;transform:translateY(4px)}}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
+.cta .btn{min-height:48px;padding:0 22px}
+.note{margin-top:14px;font-size:13px;color:var(--mu)}
+
+/* terminal demo */
+.term{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 24px 48px -12px rgba(0,0,0,.6);font-size:13px;line-height:1.65}
+.tbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:var(--s2);border-bottom:1px solid var(--bd);color:var(--mu);font-size:12px}
+.tbar span:first-child{display:flex;align-items:center;gap:8px}
+.tbar span:first-child:before{content:"";width:8px;height:8px;background:var(--ac);border-radius:2px}
+#stateLbl{color:var(--tx)}
+.stage{position:relative;height:300px}
+.scr{position:absolute;inset:0;padding:22px;display:flex;flex-direction:column;justify-content:center;gap:14px;opacity:0;visibility:hidden;transform:translateY(8px);transition:opacity var(--base) var(--ease),transform var(--base) var(--ease),visibility 0s var(--base)}
+.scr.on{opacity:1;visibility:visible;transform:none;transition:opacity var(--base) var(--ease) 80ms,transform var(--base) var(--ease) 80ms,visibility 0s}
+.tfoot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--bd);color:var(--mu);font-size:12px}
+.tfoot div{display:flex;gap:6px}
+.tfoot button{min-height:32px;padding:0 10px;background:none;border:1px solid transparent;border-radius:6px;color:var(--mu);font:500 12px var(--mono);cursor:pointer;transition:color var(--fast),border-color var(--fast)}
+.tfoot button:hover{color:var(--tx);border-color:var(--bd)}
+.dim{color:var(--mu)}
+.field{border-left:2px solid var(--ac);background:var(--s2);border-radius:0 var(--r1) var(--r1) 0;padding:10px 12px;word-break:break-all}
+.field.n{border-color:var(--bd)}
+.cur{display:inline-block;width:7px;height:15px;background:var(--tx);vertical-align:-3px;margin-left:1px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.spin{width:22px;height:22px;border:2px solid var(--bd2);border-top-color:var(--ac);border-radius:50%;animation:rot .8s linear infinite;flex:none}
+@keyframes rot{to{transform:rotate(360deg)}}
+.row{display:flex;align-items:center;gap:12px}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.cols h4{font-size:12px;color:var(--mu);font-weight:500;margin-bottom:6px}
+.cols div div{padding:3px 8px;border-radius:6px;color:var(--mu)}
+.cols .sel{background:rgba(100,150,255,.14);color:var(--tx)}
+.bar{height:6px;background:var(--bd);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;width:100%;background:var(--ac);transform-origin:left;transform:scaleX(0);transition:transform 250ms linear;border-radius:99px;position:relative}
+.bar.live i:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);width:40%;animation:sheen 1.6s linear infinite}
+@keyframes sheen{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+.stats{display:flex;justify-content:space-between;font-size:12px;color:var(--mu);margin-top:8px;font-variant-numeric:tabular-nums}
+.stats b{color:var(--tx);font-weight:700}
+.steps3{list-style:none;display:grid;gap:10px}
+.steps3 li{display:flex;align-items:center;gap:10px;color:var(--mu)}
+.steps3 li.ok{color:var(--tx)}
+.steps3 .ic{width:20px;height:20px;border-radius:50%;border:1px solid var(--bd2);display:grid;place-items:center;flex:none;font-size:11px}
+.steps3 li.ok .ic{background:rgba(52,211,153,.15);border-color:rgba(52,211,153,.5);color:var(--ok)}
+.steps3 li.run .ic{border:2px solid var(--bd2);border-top-color:var(--ac);animation:rot .9s linear infinite}
+.mark{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:18px;font-weight:700}
+.mark.ok{background:rgba(52,211,153,.15);color:var(--ok);animation:pop var(--slow) var(--ease)}
+.mark.er{background:rgba(248,113,113,.14);color:var(--er)}
+@keyframes pop{from{transform:scale(.8);opacity:0}to{transform:none;opacity:1}}
+.err{color:var(--er);font-weight:700}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+
+/* install */
+.setup{display:grid;gap:12px;margin-top:40px;list-style:none;max-width:760px}
+.step{display:grid;grid-template-columns:36px 1fr;gap:16px;padding:20px;border:1px solid var(--bd);border-radius:var(--r2);background:var(--s1);transition:border-color var(--base),opacity var(--base)}
+.step[data-s=todo]{opacity:.55}
+.step[data-s=active]{border-color:var(--bd2)}
+.num{width:32px;height:32px;border-radius:50%;border:1px solid var(--bd2);display:grid;place-items:center;font:600 13px var(--mono);color:var(--mu);transition:all var(--base)}
+.step[data-s=active] .num{border-color:var(--ac);color:var(--ac)}
+.step[data-s=done] .num{background:rgba(52,211,153,.15);border-color:rgba(52,211,153,.5);color:var(--ok)}
+.step h3{font-size:16px;font-weight:600;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tag{font-size:12px;font-weight:500;color:var(--mu);border:1px solid var(--bd);border-radius:99px;padding:0 8px}
+.step p{color:var(--mu);margin-top:4px;font-size:14px;text-wrap:pretty}
+kbd{font:500 12px var(--mono);background:var(--s2);border:1px solid var(--bd);border-bottom-width:2px;border-radius:5px;padding:1px 6px;color:var(--tx)}
+.code{margin-top:14px;border:1px solid var(--bd);border-radius:var(--r1);background:var(--bg);overflow:hidden}
+.chead{display:flex;justify-content:space-between;align-items:center;padding:6px 6px 6px 14px;border-bottom:1px solid var(--bd);font-size:12px;color:var(--mu)}
+.code pre{padding:16px;font:14px/1.6 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.code .ps{color:var(--mu);user-select:none}
+.check{list-style:none;margin-top:14px;display:grid;gap:8px;font-size:14px}
+.check li{display:flex;gap:10px;align-items:center;color:var(--mu)}
+.check li span.s{margin-left:auto;font-size:12px}
+.check li.ok{color:var(--tx)}
+.check li.ok span.s{color:var(--ok)}
+.after{margin-top:14px;display:none;align-items:center;gap:10px;flex-wrap:wrap;color:var(--mu);font-size:14px}
+.after.on{display:flex;animation:pop var(--base) var(--ease)}
+.stp{margin-top:14px}
+details{margin-top:14px;font-size:14px;color:var(--mu)}
+details summary{cursor:pointer;min-height:32px;display:flex;align-items:center}
+details p{margin-top:6px}
+
+/* features, platforms, commands */
+.grid{display:grid;gap:16px;margin-top:40px;grid-template-columns:repeat(3,1fr)}
+.card{padding:24px;border:1px solid var(--bd);border-radius:var(--r2);background:var(--s1);box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.card h3{font-size:16px;font-weight:600;letter-spacing:-.01em}
+.card p{color:var(--mu);font-size:14px;line-height:1.65;margin-top:8px;text-wrap:pretty}
+.chips{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
+.chip{padding:12px 16px;border:1px solid var(--bd);border-radius:var(--r1);background:var(--s1)}
+.chip b{display:block;font-size:15px;font-weight:600}
+.chip span{font-size:13px;color:var(--mu)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px}
+.two h3{font-size:16px;font-weight:600;margin-bottom:12px}
+dl>div{display:flex;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--bd);font-size:14px}
+dt{font:500 13px var(--mono)}
+dd{color:var(--mu);text-align:right}
+
+footer{border-top:1px solid var(--bd);padding:32px 0;color:var(--mu);font-size:13px}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+footer nav a{padding:6px 10px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,16px);opacity:0;pointer-events:none;background:var(--s2);border:1px solid var(--bd2);color:var(--tx);padding:12px 16px;border-radius:var(--r1);font-size:14px;transition:all var(--base) var(--ease);z-index:9}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+
+@media(min-width:960px){.hero{grid-template-columns:1fr 1.05fr}}
+@media(max-width:959px){.grid{grid-template-columns:repeat(2,1fr)}.grid .card:last-child{grid-column:1/-1}}
+@media(max-width:720px){
+  section{padding:56px 0}.wrap{padding:0 18px}
+  .menu{display:block}
+  nav#nav{display:none;position:absolute;top:64px;right:0;left:0;flex-direction:column;align-items:stretch;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r2);padding:8px;z-index:5}
+  nav#nav.open{display:flex}nav#nav a{padding:14px}
+  .grid,.two{grid-template-columns:1fr}.two{gap:32px}
+  .hero{padding:24px 0 56px}.cta .btn{flex:1 1 100%}
+  .step{grid-template-columns:1fr;gap:10px;padding:16px}
+  .stage{height:330px}.scr{padding:16px}.cols{gap:6px;font-size:12px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  .scr{transform:none}
+}
+</style>
 </head>
-<body class="relative min-h-screen flex flex-col justify-between grid-bg selection:bg-neutral-800">
+<body>
 
-  <!-- Glow Effect -->
-  <div class="absolute top-[-20%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-neutral-900/40 rounded-full blur-[140px] pointer-events-none"></div>
+<header><div class="wrap">
+  <a class="logo" href="#top"><b>M_</b>Media Downloader</a>
+  <button class="menu" id="menuBtn" aria-expanded="false" aria-controls="nav">Menu</button>
+  <nav id="nav" aria-label="Utama">
+    <a href="#install">Instalasi</a><a href="#features">Fitur</a><a href="#platforms">Platform</a><a href="#commands">Perintah</a>
+    <a href="https://github.com/Danishtzy24/media-downloader-cli" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</div></header>
 
-  <!-- Header -->
-  <header class="w-full max-w-6xl mx-auto px-6 py-8 flex justify-between items-center z-10">
-    <div class="flex items-center gap-3">
-      <div class="w-9 h-9 rounded-lg border border-neutral-800 bg-neutral-900 flex items-center justify-center font-mono font-bold text-sm tracking-tighter select-none">M_</div>
-      <div>
-        <span class="font-mono font-bold tracking-tight text-white block">MEDIA</span>
-        <span class="text-[10px] text-neutral-500 font-mono -mt-1 block">DOWNLOADER CLI</span>
-      </div>
+<main id="top">
+<div class="wrap hero">
+  <div>
+    <span class="badge"><i></i>Versi 1.0, khusus Windows</span>
+    <h1>Download media dari banyak platform, langsung di PowerShell.</h1>
+    <p class="lead">Tempel link, pilih resolusi, selesai. Mendukung YouTube, TikTok, Twitter/X, Instagram, Bstation, dan 1000+ situs lain.</p>
+    <div class="cta">
+      <button class="btn p" data-copy>Salin perintah instalasi</button>
+      <a class="btn" href="#install">Lihat panduan 3 langkah</a>
     </div>
-    <nav class="hidden md:flex items-center gap-6 text-sm">
-      <a href="#install" class="text-neutral-400 hover:text-white transition-colors">Install</a>
-      <a href="#features" class="text-neutral-400 hover:text-white transition-colors">Fitur</a>
-      <a href="#platforms" class="text-neutral-400 hover:text-white transition-colors">Platform</a>
-      <a href="https://github.com/Danishtzy24/media-downloader-cli" target="_blank" class="text-neutral-400 hover:text-white transition-colors flex items-center gap-1.5">
-        GitHub
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-      </a>
-    </nav>
-  </header>
-
-  <!-- Hero Section -->
-  <main class="flex-1 w-full max-w-6xl mx-auto px-6 py-12 md:py-16 flex flex-col lg:flex-row items-center gap-12 z-10">
-    
-    <!-- Left: Copywriting -->
-    <div class="w-full lg:w-1/2 flex flex-col justify-center">
-      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-neutral-800 bg-neutral-950/60 w-fit mb-6">
-        <span class="flex h-2 w-2 relative">
-          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-        </span>
-        <span class="text-[11px] font-mono text-neutral-400">v1.0 — Long Time Support</span>
-      </div>
-
-      <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none">
-        Download Media dari <span class="text-transparent bg-clip-text bg-gradient-to-r from-neutral-200 via-neutral-400 to-neutral-600">6+ Platform</span> dalam Satu Terminal
-      </h1>
-
-      <p class="mt-6 text-neutral-400 text-sm md:text-base leading-relaxed max-w-lg">
-        Media Downloader adalah CLI berbasis PowerShell yang mendukung YouTube, TikTok, Twitter/X, Instagram, Bstation, dan lain lain.
-      </p>
-
-      <!-- Install Box -->
-      <div class="mt-10" id="install">
-        <div class="flex items-center gap-2 mb-3">
-          <span class="text-xs font-mono text-neutral-500 uppercase tracking-wider">Instalasi Cepat</span>
-          <span class="h-[1px] flex-1 bg-neutral-900"></span>
-        </div>
-        
-        <div class="relative group">
-          <div class="w-full bg-[#101012] border border-neutral-800 rounded-xl p-4 flex items-center justify-between font-mono text-xs md:text-sm shadow-md transition-all group-hover:border-neutral-700">
-            <span class="text-neutral-300 overflow-x-auto whitespace-nowrap scrollbar-none pr-6 flex items-center select-all">
-              <span class="text-neutral-600 mr-2 select-none">&gt;</span>
-              <span id="install-link" class="text-neutral-200">irm https://media-downloader-cli.vercel.app/install | iex</span>
-            </span>
-            <button id="copy-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-800 bg-neutral-950 hover:bg-white hover:text-black hover:border-white transition-all text-xs font-semibold tracking-wide cursor-pointer text-neutral-400">
-              <svg id="copy-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-              <svg id="check-icon" class="w-3.5 h-3.5 hidden text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
-              <span id="copy-text">Copy</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="mt-4 grid grid-cols-2 gap-3 text-xs font-mono text-neutral-500">
-          <div class="flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
-            <code class="text-neutral-300">Media</code> → Jalankan
-          </div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
-            <code class="text-neutral-300">Remove-Media</code> → Hapus
-          </div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
-            <code class="text-neutral-300">update</code> → Cek update
-          </div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-neutral-700"></span>
-            <code class="text-neutral-300">reset</code> → Buka blokir
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right: Terminal Mockup -->
-    <div class="w-full lg:w-1/2 flex items-center justify-center">
-      <div class="w-full max-w-[560px] aspect-[4/3] rounded-xl border border-neutral-800 bg-[#0c0c0d] overflow-hidden shadow-2xl flex flex-col" style="box-shadow: 0 30px 80px rgba(0,0,0,0.8);">
-        <div class="bg-[#141416] px-4 py-3 border-b border-neutral-900 flex items-center justify-between select-none">
-          <div class="flex gap-2">
-            <span class="w-3 h-3 rounded-full bg-[#ff5f56]"></span>
-            <span class="w-3 h-3 rounded-full bg-[#ffbd2e]"></span>
-            <span class="w-3 h-3 rounded-full bg-[#27c93f]"></span>
-          </div>
-          <span class="font-mono text-[11px] text-neutral-500">Windows PowerShell — Media v1.0</span>
-          <div class="w-10"></div>
-        </div>
-
-        <div id="terminal-content" class="flex-1 p-6 font-mono text-xs md:text-sm flex flex-col justify-between overflow-y-auto selection:bg-neutral-800 leading-relaxed text-neutral-300">
-          
-          <!-- SCREEN 1: WELCOME -->
-          <div id="term-screen-1" class="h-full flex flex-col justify-between">
-            <div class="space-y-4">
-              <pre class="text-[9px] md:text-[11px] leading-[1.1] font-bold text-white tracking-wider select-none text-center">
-███╗   ███╗███████╗██████╗ ██╗ █████╗ 
-████╗ ████║██╔════╝██╔══██╗██║██╔══██╗
-██╔████╔██║█████╗  ██║  ██║██║███████║
-██║╚██╔╝██║██╔══╝  ██║  ██║██║██╔══██║
-██║ ╚═╝ ██║███████╗██████╔╝██║██║  ██║
-╚═╝     ╚═╝╚══════╝╚═════╝ ╚═╝╚═╝  ╚═╝</pre>
-              <div class="text-center text-[10px] text-neutral-500 tracking-wider -mt-2 uppercase">Media Downloader v1.0</div>
-
-              <div class="mt-6 border border-neutral-800 bg-[#121214] rounded-lg p-3 space-y-2">
-                <div class="flex items-center gap-2">
-                  <span class="text-neutral-500 font-bold">←</span>
-                  <span class="text-white font-bold" id="term-platform">YouTube</span>
-                  <span class="text-neutral-500 font-bold">→</span>
-                </div>
-                <div class="border-l-2 border-[#6496ff] pl-3 py-1 text-xs">
-                  <span class="text-neutral-500 select-none">URL: </span>
-                  <span id="term-input-text" class="text-neutral-300 font-mono"></span><span class="cursor-blink"></span>
-                </div>
-                <div class="border-l-2 border-neutral-800 pl-3 py-1 text-[11px] text-neutral-500">
-                  Folder: C:\Users\danis\Downloads
-                </div>
-              </div>
-            </div>
-
-            <div class="space-y-2">
-              <div class="flex justify-center gap-4 text-[10px] text-neutral-500 select-none">
-                <span>←→ platform</span>
-                <span>tab folder</span>
-                <span>f2 settings</span>
-              </div>
-              <div class="text-center text-[11px] text-neutral-400">
-                <span class="text-orange-400">•</span> Format: MP4  ·  Dubbing: Original  ·  Resolusi: Terbaik
-              </div>
-            </div>
-          </div>
-
-          <!-- SCREEN 2: FETCHING -->
-          <div id="term-screen-2" class="hidden h-full flex flex-col justify-center items-center gap-3">
-            <span class="text-[#78dcdc] text-2xl animate-spin">⠋</span>
-            <span class="text-white font-medium">Mengambil informasi video...</span>
-            <span class="text-neutral-500 text-xs truncate max-w-[280px]" id="term-fetch-link"></span>
-          </div>
-
-          <!-- SCREEN 3: FORMAT -->
-          <div id="term-screen-3" class="hidden h-full flex flex-col justify-between">
-            <div class="space-y-4">
-              <div class="border-l-2 border-[#6496ff] pl-3 py-1 bg-[#121214] rounded-r-lg">
-                <div class="text-white font-bold truncate" id="term-video-title">Judul Video</div>
-                <div class="text-neutral-500 text-xs">3:33  ·  Channel Name</div>
-              </div>
-
-              <div class="grid grid-cols-3 gap-2 text-xs">
-                <div class="space-y-2">
-                  <div class="text-[#6496ff] font-bold">Resolusi</div>
-                  <div class="space-y-1 text-neutral-400">
-                    <div><span class="text-[#6496ff]">▸</span> <span class="text-white">1080p FHD</span></div>
-                    <div class="pl-3">720p HD</div>
-                    <div class="pl-3">480p</div>
-                  </div>
-                </div>
-                <div class="space-y-2">
-                  <div class="text-neutral-500">Audio</div>
-                  <div class="space-y-1 text-neutral-400">
-                    <div class="pl-3 text-neutral-500">Original</div>
-                    <div class="pl-3 text-neutral-500">Indonesia</div>
-                  </div>
-                </div>
-                <div class="space-y-2">
-                  <div class="text-neutral-500">Subtitle</div>
-                  <div class="space-y-1 text-neutral-400">
-                    <div class="pl-3 text-neutral-500">Tidak</div>
-                    <div class="pl-3 text-neutral-500">Indonesia</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="text-center text-[10px] text-neutral-500 select-none">
-              ↑↓ pilih  ·  ←→/tab kolom  ·  enter download  ·  esc batal
-            </div>
-          </div>
-
-          <!-- SCREEN 4: DOWNLOAD -->
-          <div id="term-screen-4" class="hidden h-full flex flex-col justify-center gap-6">
-            <div class="border-l-2 border-[#6496ff] pl-3 py-1 bg-[#121214] rounded-r-lg">
-              <div class="text-white font-bold truncate" id="term-dl-title">Judul Video</div>
-              <div class="text-[#78dcdc] text-[11px] font-bold mt-1">Downloading...</div>
-            </div>
-
-            <div>
-              <div class="flex justify-between items-center text-xs mb-1">
-                <span class="text-neutral-400" id="term-dl-speed">4.50 MiB/s</span>
-                <span class="text-white font-bold" id="term-dl-pct">0%</span>
-              </div>
-              <div class="w-full bg-[#1c1c1f] rounded-full h-2 overflow-hidden flex">
-                <div id="term-dl-bar" class="bg-[#6496ff] h-full transition-all duration-150" style="width: 0%"></div>
-              </div>
-              <div class="flex justify-between items-center text-[10px] text-neutral-500 mt-1">
-                <span id="term-dl-eta">ETA 00:15</span>
-                <span id="term-dl-size">0.0 MiB / 87.4 MiB</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- SCREEN 5: DONE -->
-          <div id="term-screen-5" class="hidden h-full flex flex-col justify-center items-center gap-4 text-center">
-            <span class="text-emerald-400 text-3xl">✓</span>
-            <div class="space-y-1">
-              <div class="text-white font-bold text-sm">Download Selesai!</div>
-              <div class="text-neutral-500 text-xs">File tersimpan di folder tujuan.</div>
-            </div>
-            <button id="term-reset-btn" class="mt-2 px-3 py-1.5 rounded-lg border border-neutral-800 hover:border-neutral-700 bg-neutral-950 font-mono text-xs cursor-pointer text-neutral-400 hover:text-white transition-all">
-              Mulai Lagi (Enter)
-            </button>
-          </div>
-
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <!-- ALL FEATURES SECTION -->
-  <section class="w-full max-w-6xl mx-auto px-6 py-12 md:py-20 border-t border-neutral-900/60 mt-12" id="features">
-    <div class="text-center mb-12">
-      <h2 class="text-2xl md:text-3xl font-bold text-white">Fitur Lengkap</h2>
-      <p class="text-neutral-400 text-sm mt-2 max-w-2xl mx-auto">Semua yang kamu butuhkan untuk download media dari internet, dalam satu tool terminal yang powerful.</p>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      
-      <!-- Feature 1: Multi Platform -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">01</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">6+ Platform Support</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">YouTube (termasuk Music & Playlist), TikTok, Twitter/X, Instagram (Reels/Post), Bstation, dan gambar langsung dari URL.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 2: MP3 Cover Art -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">02</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">MP3 dengan Cover Art</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Download audio saja dengan thumbnail album art otomatis ter-embed (crop persegi 1:1) + metadata lengkap (artist, album, title).</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 3: Multi Audio Track -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">03</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Dubbing Multi-Bahasa</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Deteksi otomatis trek audio dubbing (Indonesia, English, Japanese, dll) untuk video YouTube yang mendukung multi-audio.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 4: Playlist Bulk -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">04</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Playlist Bulk Download</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Download seluruh playlist dengan checklist progress per video. Support YouTube Music playlist (auto MP3 semua track).</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 5: Auto Cookies -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">05</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Auto Browser Cookies</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Akses video private, members-only, atau login-required dengan cookie otomatis dari Chrome/Edge/Firefox/Brave.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 6: AVC/H.264 Output -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">06</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Output AVC/H.264</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Selalu menghasilkan MP4 dengan codec video H.264 (AVC) + audio AAC untuk kompatibilitas maksimal di semua device.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 7: Windows Autoplay -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">07</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Windows Autoplay</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Otomatis memutar file hasil download dengan media player default dari Windows Settings (VLC, WMP, PotPlayer, dll).</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 9: Auto Update -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">08</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Auto Update</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Cek versi terbaru dari GitHub tiap start. Kalau ada update, langsung download & restart otomatis dengan countdown 3 detik.</p>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Feature 11: Image Download -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">09</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Direct Image Download</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Paste URL gambar (.jpg, .png, .webp, .gif) langsung download tanpa yt-dlp. Otomatis simpan dengan timestamp.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature 12: Settings Persistent -->
-      <div class="feature-card p-5 rounded-xl bg-[#0d0d0e]/40">
-        <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center font-bold text-[#6496ff] text-xs font-mono flex-shrink-0">10</div>
-          <div>
-            <h3 class="text-white font-bold text-sm">Settings Persistent</h3>
-            <p class="text-neutral-400 text-xs leading-relaxed mt-1.5">Simpan preferensi format (MP4/MP3), resolusi max, dubbing language, cookies, autoplay, auto-update di JSON lokal.</p>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- PLATFORMS SECTION -->
-  <section class="w-full max-w-6xl mx-auto px-6 py-12 md:py-20 border-t border-neutral-900/60" id="platforms">
-    <div class="text-center mb-10">
-      <h2 class="text-2xl md:text-3xl font-bold text-white">Platform yang Didukung</h2>
-      <p class="text-neutral-400 text-sm mt-2">Semua platform populer dengan fitur spesifik masing-masing.</p>
-    </div>
-
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
-        <div class="text-white font-bold text-sm">YouTube</div>
-        <div class="text-[10px] text-neutral-500 mt-1">Video, Music, Playlist, Shorts</div>
-      </div>
-      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
-        <div class="text-white font-bold text-sm">TikTok</div>
-        <div class="text-[10px] text-neutral-500 mt-1">Video progressive</div>
-      </div>
-      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
-        <div class="text-white font-bold text-sm">Twitter / X</div>
-        <div class="text-[10px] text-neutral-500 mt-1">Video timeline</div>
-      </div>
-      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
-        <div class="text-white font-bold text-sm">Instagram</div>
-        <div class="text-[10px] text-neutral-500 mt-1">Reels, Posts</div>
-      </div>
-      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
-        <div class="text-white font-bold text-sm">Bstation</div>
-        <div class="text-[10px] text-neutral-500 mt-1">Bilibili video</div>
-      </div>
-      <div class="p-4 rounded-xl border border-neutral-900 bg-[#0d0d0e]/40 text-center hover:border-neutral-800 transition-all">
-        <div class="text-white font-bold text-sm">Generic</div>
-        <div class="text-[10px] text-neutral-500 mt-1">1000+ situs via yt-dlp</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- COMMANDS CHEATSHEET -->
-  <section class="w-full max-w-6xl mx-auto px-6 py-12 md:py-20 border-t border-neutral-900/60">
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <div>
-        <h3 class="text-white font-bold text-lg mb-4">Perintah Terminal</h3>
-        <div class="space-y-2 font-mono text-xs">
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">Media</code>
-            <span class="text-neutral-500">Jalankan aplikasi</span>
-          </div>
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">Remove-Media</code>
-            <span class="text-neutral-500">Uninstall lengkap</span>
-          </div>
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">update</code>
-            <span class="text-neutral-500">Cek update manual</span>
-          </div>
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">reset</code>
-            <span class="text-neutral-500">Buka blokir platform</span>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <h3 class="text-white font-bold text-lg mb-4">Keyboard Shortcuts</h3>
-        <div class="space-y-2 font-mono text-xs">
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">← →</code>
-            <span class="text-neutral-500">Ganti platform</span>
-          </div>
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">Tab</code>
-            <span class="text-neutral-500">Pindah field (URL/Folder)</span>
-          </div>
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">F2</code>
-            <span class="text-neutral-500">Buka Settings</span>
-          </div>
-          <div class="flex justify-between items-center p-3 rounded-lg bg-[#101012] border border-neutral-900">
-            <code class="text-neutral-300">Ctrl+V</code>
-            <span class="text-neutral-500">Paste dari clipboard</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Footer -->
-  <footer class="w-full max-w-6xl mx-auto px-6 py-8 border-t border-neutral-900 flex flex-col md:flex-row justify-between items-center text-xs text-neutral-500 gap-4 z-10">
-    <div>© 2026 Danishtzy24. Media Downloader CLI is licensed under MIT.</div>
-    <div class="flex gap-6 font-mono text-[10px]">
-    </div>
-  </footer>
-
-  <!-- Toast -->
-  <div id="toast" class="fixed bottom-6 right-6 z-50 bg-[#161618] border border-neutral-800 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2.5 text-xs text-neutral-200 hidden select-none">
-    <span class="text-emerald-500 font-bold">✓</span>
-    <span id="toast-msg">Salin berhasil</span>
+    <p class="note">Perintah dijalankan di PowerShell. yt-dlp dan FFmpeg ikut terpasang otomatis.</p>
   </div>
 
-  <script>
-    // Config
-    const REPO_LINK = "https://media-downloader-cli.vercel.app/install"
-    document.getElementById('install-link').textContent = REPO_LINK;
+  <div>
+    <div class="term" id="demo" tabindex="0" aria-label="Demo alur download di terminal. Jeda otomatis saat disorot atau difokus.">
+      <div class="tbar"><span>PowerShell, Media</span><span id="stateLbl" aria-live="polite">Siap</span></div>
+      <div class="stage">
+        <div class="scr on" data-s="idle">
+          <div class="dim">Platform: <b id="plat" style="color:var(--tx)">YouTube</b></div>
+          <div class="field"><span class="dim">URL </span><span id="typed"></span><i class="cur"></i></div>
+          <div class="field n dim">Folder: C:\Users\Anda\Downloads</div>
+          <div class="dim">Format MP4, resolusi terbaik</div>
+        </div>
+        <div class="scr" data-s="fetch">
+          <div class="row"><div class="spin"></div><b>Mengambil informasi video</b></div>
+          <div class="dim" id="fetchUrl" style="word-break:break-all"></div>
+        </div>
+        <div class="scr" data-s="format">
+          <div class="field"><b id="vTitle"></b><div class="dim">3:33, durasi video</div></div>
+          <div class="cols">
+            <div><h4>Resolusi</h4><div class="sel">1080p FHD</div><div>720p HD</div><div>480p</div></div>
+            <div><h4>Audio</h4><div class="sel">Original</div><div>Indonesia</div></div>
+            <div><h4>Subtitle</h4><div class="sel">Tidak</div><div>Indonesia</div></div>
+          </div>
+          <div class="dim">Tekan Enter untuk mulai mengunduh</div>
+        </div>
+        <div class="scr" data-s="download">
+          <div class="field"><b id="dTitle"></b><div style="color:var(--ac)">Mengunduh</div></div>
+          <div><div class="bar live" id="bar"><i></i></div>
+            <div class="stats"><span id="spd">0 MiB/s</span><b id="pct">0%</b></div>
+            <div class="stats"><span id="eta">ETA --:--</span><span id="sz">0.0 / 87.4 MiB</span></div></div>
+        </div>
+        <div class="scr" data-s="process">
+          <div class="field"><b id="pTitle"></b><div class="dim">Menyiapkan file akhir</div></div>
+          <ul class="steps3"><li class="ok"><span class="ic">&#10003;</span>Video diunduh</li><li class="ok"><span class="ic">&#10003;</span>Audio diunduh</li><li class="run"><span class="ic"></span>Menggabungkan audio dan video</li></ul>
+        </div>
+        <div class="scr" data-s="done">
+          <div class="row"><div class="mark ok">&#10003;</div><div><b>Download selesai</b><div class="dim">87.4 MiB, MP4 (H.264 + AAC)</div></div></div>
+          <div class="field n"><span id="fname"></span><div class="dim">Tersimpan di C:\Users\Anda\Downloads</div></div>
+          <div class="acts"><button class="btn sm" id="again">Download lagi</button></div>
+        </div>
+        <div class="scr" data-s="error">
+          <div class="row"><div class="mark er">!</div><div><div class="err">Download gagal</div><div>Video ini memerlukan login.</div></div></div>
+          <div class="dim">Aktifkan cookies browser di pengaturan (F2), lalu coba lagi.</div>
+          <div class="acts"><button class="btn sm p" id="retry">Coba lagi</button><button class="btn sm" id="chg">Ubah URL</button></div>
+        </div>
+      </div>
+      <div class="tfoot"><span>Demo animasi, bukan unduhan nyata</span><div><button id="pp">Jeda</button><button id="rp">Ulangi</button></div></div>
+    </div>
+  </div>
+</div>
 
-    // Copy Handler
-    const copyBtn = document.getElementById('copy-btn');
-    const copyIcon = document.getElementById('copy-icon');
-    const checkIcon = document.getElementById('check-icon');
-    const copyText = document.getElementById('copy-text');
-    const toast = document.getElementById('toast');
-    const toastMsg = document.getElementById('toast-msg');
+<section id="install"><div class="wrap">
+  <h2>Pasang dalam 3 langkah</h2>
+  <p class="lead">Satu perintah memasang Media, yt-dlp, dan FFmpeg. Tidak perlu konfigurasi manual.</p>
+  <ol class="setup">
+    <li class="step" data-s="active">
+      <div class="num">1</div>
+      <div>
+        <h3>Buka PowerShell <span class="tag">Windows</span></h3>
+        <p>Tekan <kbd>Win</kbd> + <kbd>X</kbd>, lalu pilih Terminal atau Windows PowerShell.</p>
+        <div class="stp"><button class="btn sm" data-go="1">Sudah terbuka</button></div>
+      </div>
+    </li>
+    <li class="step" data-s="todo">
+      <div class="num">2</div>
+      <div>
+        <h3>Salin dan tempel perintah</h3>
+        <p>Tempel dengan klik kanan atau <kbd>Ctrl</kbd> + <kbd>V</kbd>, lalu tekan <kbd>Enter</kbd>.</p>
+        <div class="code">
+          <div class="chead"><span>PowerShell</span><button class="btn sm" data-copy>Salin</button></div>
+          <pre><span class="ps">PS C:\&gt; </span><code id="cmd">irm https://media-downloader-cli.vercel.app/install | iex</code></pre>
+        </div>
+        <details><summary>Apa yang dipasang?</summary>
+          <p>Media (aplikasinya), yt-dlp (mengambil video), dan FFmpeg (menggabungkan audio dan video). Kode sumber terbuka di GitHub.</p></details>
+      </div>
+    </li>
+    <li class="step" data-s="todo">
+      <div class="num">3</div>
+      <div>
+        <h3>Tunggu instalasi selesai</h3>
+        <p>Proses ini bisa memakan beberapa menit. Jangan tutup jendela PowerShell.</p>
+        <ul class="check" id="chk">
+          <li><span>yt-dlp</span><span class="s">Akan dipasang</span></li>
+          <li><span>FFmpeg</span><span class="s">Akan dipasang</span></li>
+          <li><span>Media CLI</span><span class="s">Akan dipasang</span></li>
+        </ul>
+        <div class="stp"><button class="btn sm" data-go="3">Instalasi sudah selesai</button></div>
+        <div class="after" id="after">Instalasi selesai. Ketik <kbd>Media</kbd> di PowerShell untuk mulai.</div>
+      </div>
+    </li>
+  </ol>
+</div></section>
 
-    copyBtn.addEventListener('click', async () => {
-      const fullCmd = `irm ${REPO_LINK} | iex`;
-      try {
-        await navigator.clipboard.writeText(fullCmd);
-        copyBtn.classList.add('border-emerald-500/30', 'bg-emerald-950/20');
-        copyIcon.classList.add('hidden');
-        checkIcon.classList.remove('hidden');
-        copyText.textContent = "Copied";
-        copyText.classList.add('text-emerald-400');
-        showToast("Perintah instalasi disalin!");
-        setTimeout(() => {
-          copyBtn.classList.remove('border-emerald-500/30', 'bg-emerald-950/20');
-          copyIcon.classList.remove('hidden');
-          checkIcon.classList.add('hidden');
-          copyText.textContent = "Copy";
-          copyText.classList.remove('text-emerald-400');
-        }, 2000);
-      } catch (err) {
-        showToast("Gagal menyalin, silakan salin manual.");
-      }
-    });
+<section id="features"><div class="wrap">
+  <h2>Yang bisa dilakukan Media</h2>
+  <p class="lead">Dari satu video sampai playlist penuh, dengan hasil yang langsung bisa diputar.</p>
+  <div class="grid">
+    <div class="card"><h3>Banyak platform</h3><p>YouTube (termasuk Music dan playlist), TikTok, Twitter/X, Instagram, Bstation, dan link gambar langsung.</p></div>
+    <div class="card"><h3>MP3 dengan cover art</h3><p>Audio saja, lengkap dengan sampul album persegi dan metadata artis, album, dan judul.</p></div>
+    <div class="card"><h3>Dubbing multi-bahasa</h3><p>Mendeteksi trek audio dubbing pada video YouTube yang mendukung multi-audio.</p></div>
+    <div class="card"><h3>Playlist sekaligus</h3><p>Unduh seluruh playlist dengan checklist progres per video. Playlist YouTube Music otomatis jadi MP3.</p></div>
+    <div class="card"><h3>Video privat dan members-only</h3><p>Memakai cookies dari Chrome, Edge, Firefox, atau Brave agar video yang butuh login bisa diunduh.</p></div>
+    <div class="card"><h3>MP4 yang kompatibel</h3><p>Output selalu H.264 (AVC) dengan audio AAC, jadi bisa diputar di hampir semua perangkat.</p></div>
+    <div class="card"><h3>Putar otomatis</h3><p>File hasil unduhan dibuka dengan pemutar default Windows, seperti VLC, WMP, atau PotPlayer.</p></div>
+    <div class="card"><h3>Update otomatis</h3><p>Mengecek versi terbaru dari GitHub setiap dibuka, lalu memperbarui dan memulai ulang dengan hitung mundur 3 detik.</p></div>
+    <div class="card"><h3>Pengaturan tersimpan</h3><p>Format, resolusi maksimum, bahasa dubbing, cookies, dan autoplay diingat. Link gambar (.jpg, .png, .webp, .gif) juga bisa diunduh langsung.</p></div>
+  </div>
+</div></section>
 
-    function showToast(msg) {
-      toastMsg.textContent = msg;
-      toast.classList.remove('hidden');
-      toast.classList.add('animate-toast');
-      setTimeout(() => {
-        toast.classList.add('hidden');
-        toast.classList.remove('animate-toast');
-      }, 3000);
-    }
+<section id="platforms"><div class="wrap">
+  <h2>Platform yang didukung</h2>
+  <div class="chips">
+    <div class="chip"><b>YouTube</b><span>Video, Music, Playlist, Shorts</span></div>
+    <div class="chip"><b>TikTok</b><span>Video</span></div>
+    <div class="chip"><b>Twitter / X</b><span>Video timeline</span></div>
+    <div class="chip"><b>Instagram</b><span>Reels dan Post</span></div>
+    <div class="chip"><b>Bstation</b><span>Video Bilibili</span></div>
+    <div class="chip"><b>Situs lain</b><span>1000+ situs lewat yt-dlp</span></div>
+  </div>
+</div></section>
 
-    // Terminal Simulation
-    const platforms = ["YouTube", "TikTok", "Twitter", "Instagram", "Bstation"];
-    const hints = [
-      "https://youtu.be/fDTEAeYEJ5s?si=gmX7VjWoahJMe-SV",
-      "https://www.tiktok.com/@mrbeast/video/7319382103",
-      "https://x.com/SpaceX/status/1749102830",
-      "https://www.instagram.com/reel/C2F98hAL_yv/",
-      "https://www.bilibili.tv/id/video/4789102"
-    ];
-    const titles = [
-      "3 Levels of Car Theft - Mark Rober",
-      "I Survived 100 Days In Nuclear Bunker",
-      "Starship Flight 3 Launch Highlights",
-      "Insane Drone Shot of Dolomites Alps",
-      "Bocchi The Rock! - Official Series"
-    ];
+<section id="commands"><div class="wrap">
+  <h2>Perintah dan pintasan</h2>
+  <div class="two">
+    <div><h3>Perintah di PowerShell</h3><dl>
+      <div><dt>Media</dt><dd>Jalankan aplikasi</dd></div>
+      <div><dt>update</dt><dd>Cek update manual</dd></div>
+      <div><dt>reset</dt><dd>Buka blokir platform</dd></div>
+      <div><dt>Remove-Media</dt><dd>Uninstall lengkap</dd></div></dl></div>
+    <div><h3>Pintasan keyboard</h3><dl>
+      <div><dt>&larr; &rarr;</dt><dd>Ganti platform</dd></div>
+      <div><dt>Tab</dt><dd>Pindah antara URL dan folder</dd></div>
+      <div><dt>F2</dt><dd>Buka pengaturan</dd></div>
+      <div><dt>Ctrl + V</dt><dd>Tempel dari clipboard</dd></div></dl></div>
+  </div>
+</div></section>
+</main>
 
-    let currentStep = 1, loopIndex = 0, typingTimer = null, progressTimer = null;
-    const screens = [null, document.getElementById('term-screen-1'), document.getElementById('term-screen-2'), document.getElementById('term-screen-3'), document.getElementById('term-screen-4'), document.getElementById('term-screen-5')];
-    const els = {
-      platform: document.getElementById('term-platform'),
-      input: document.getElementById('term-input-text'),
-      fetchLink: document.getElementById('term-fetch-link'),
-      videoTitle: document.getElementById('term-video-title'),
-      dlTitle: document.getElementById('term-dl-title'),
-      dlPct: document.getElementById('term-dl-pct'),
-      dlBar: document.getElementById('term-dl-bar'),
-      dlSpeed: document.getElementById('term-dl-speed'),
-      dlEta: document.getElementById('term-dl-eta'),
-      dlSize: document.getElementById('term-dl-size'),
-      resetBtn: document.getElementById('term-reset-btn')
-    };
+<footer><div class="wrap">
+  <span>&copy; 2026 Danishtzy24. Lisensi MIT. Versi 1.0.</span>
+  <nav aria-label="Footer"><a href="https://github.com/Danishtzy24/media-downloader-cli" target="_blank" rel="noopener">GitHub</a><a href="#top">Kembali ke atas</a></nav>
+</div></footer>
+<div id="toast" role="status"></div>
 
-    function switchScreen(n) {
-      screens.forEach((s, i) => { if (i > 0) s.classList.add('hidden'); });
-      if (screens[n]) screens[n].classList.remove('hidden');
-    }
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 
-    function runSimulation() {
-      clearTimeout(typingTimer);
-      clearInterval(progressTimer);
-      const plat = platforms[loopIndex], link = hints[loopIndex], title = titles[loopIndex];
-      switchScreen(1);
-      els.platform.textContent = plat;
-      els.input.textContent = "";
+/* header border saat scroll */
+const hd=document.querySelector('header');
+addEventListener('scroll',()=>hd.classList.toggle('scrolled',scrollY>8),{passive:true});
 
-      let charIndex = 0;
-      function typeChar() {
-        if (charIndex < link.length) {
-          els.input.textContent += link[charIndex++];
-          typingTimer = setTimeout(typeChar, 40);
-        } else {
-          typingTimer = setTimeout(() => {
-            switchScreen(2);
-            els.fetchLink.textContent = link;
-            typingTimer = setTimeout(() => {
-              switchScreen(3);
-              els.videoTitle.textContent = title;
-              typingTimer = setTimeout(() => {
-                switchScreen(4);
-                els.dlTitle.textContent = title;
-                let pct = 0;
-                els.dlPct.textContent = "0%";
-                els.dlBar.style.width = "0%";
-                els.dlSpeed.textContent = "7.80 MiB/s";
-                els.dlEta.textContent = "ETA 00:11";
-                els.dlSize.textContent = "0.0 MiB / 87.4 MiB";
-                progressTimer = setInterval(() => {
-                  pct += Math.floor(Math.random() * 12) + 4;
-                  if (pct >= 100) {
-                    pct = 100;
-                    clearInterval(progressTimer);
-                    els.dlPct.textContent = "100%";
-                    els.dlBar.style.width = "100%";
-                    els.dlSpeed.textContent = "Merge audio+video...";
-                    els.dlEta.textContent = "ETA 00:00";
-                    els.dlSize.textContent = "87.4 MiB / 87.4 MiB";
-                    typingTimer = setTimeout(() => {
-                      switchScreen(5);
-                      typingTimer = setTimeout(() => {
-                        loopIndex = (loopIndex + 1) % platforms.length;
-                        runSimulation();
-                      }, 4000);
-                    }, 1500);
-                  } else {
-                    els.dlPct.textContent = pct + "%";
-                    els.dlBar.style.width = pct + "%";
-                    els.dlSize.textContent = ((87.4 * pct) / 100).toFixed(1) + " MiB / 87.4 MiB";
-                  }
-                }, 180);
-              }, 2500);
-            }, 2000);
-          }, 1000);
-        }
-      }
-      typingTimer = setTimeout(typeChar, 800);
-    }
+/* mobile menu */
+const mb=$('#menuBtn'), nav=$('#nav');
+mb.onclick=()=>{const o=nav.classList.toggle('open');mb.setAttribute('aria-expanded',o)};
+nav.onclick=e=>{if(e.target.tagName==='A'){nav.classList.remove('open');mb.setAttribute('aria-expanded',false)}};
 
-    els.resetBtn.addEventListener('click', () => {
-      loopIndex = (loopIndex + 1) % platforms.length;
-      runSimulation();
-    });
+/* toast (hanya untuk error) */
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),3500)}
 
-    window.addEventListener('DOMContentLoaded', () => { runSimulation(); });
-  </script>
+/* guided setup */
+const steps=$$('.setup .step');
+function setStep(n){steps.forEach((s,i)=>s.dataset.s=i+1<n?'done':i+1===n?'active':'todo')}
+$$('[data-go]').forEach(b=>b.onclick=()=>{
+  const n=+b.dataset.go;
+  if(n===1){setStep(2)}
+  else{
+    setStep(4);
+    $$('#chk li').forEach(li=>{li.classList.add('ok');li.lastElementChild.textContent='Terpasang'});
+    $('#after').classList.add('on');b.disabled=true;
+  }
+});
+
+/* copy */
+async function copyCmd(){
+  const t=$('#cmd').textContent;
+  try{await navigator.clipboard.writeText(t);return true}catch(e){
+    try{const a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity=0;document.body.appendChild(a);a.select();const ok=document.execCommand('copy');a.remove();return ok}catch(_){return false}
+  }
+}
+$$('[data-copy]').forEach(b=>b.onclick=async()=>{
+  const label=b.textContent;
+  if(await copyCmd()){
+    b.textContent='Tersalin';b.classList.add('ok');
+    if(steps[1].dataset.s!=='done'&&steps[2].dataset.s==='todo')setStep(3);
+    setTimeout(()=>{b.textContent=label;b.classList.remove('ok')},2000);
+  }else toast('Gagal menyalin. Pilih perintah lalu salin manual.');
+});
+
+/* demo terminal */
+const rm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const names={idle:'Mengetik URL',fetch:'Mengambil info',format:'Pilih format',download:'Mengunduh',process:'Memproses',done:'Selesai',error:'Gagal'};
+const items=[
+ {p:'YouTube',u:'https://youtu.be/abc123xyz',t:'Kota di Malam Hari, Dokumenter Pendek'},
+ {p:'TikTok',u:'https://www.tiktok.com/@kreator/video/7319382103',t:'Resep Sambal dalam 60 Detik'},
+ {p:'Twitter / X',u:'https://x.com/studio/status/1749102830',t:'Cuplikan Peluncuran Roket'},
+ {p:'Instagram',u:'https://www.instagram.com/reel/C2F98hAL/',t:'Reel Perjalanan',fail:1},
+ {p:'Bstation',u:'https://www.bilibili.tv/id/video/4789102',t:'Episode 1, Serial Resmi'}
+];
+let run=0,cur=0,hold=false,user=false,failed={};
+const demo=$('#demo');
+const isPaused=()=>hold||user;
+const wait=ms=>new Promise(r=>{let t=0;const i=setInterval(()=>{if(!isPaused()){t+=10;if(t>=ms){clearInterval(i);r()}}},10)});
+function show(s){$$('.scr').forEach(e=>e.classList.toggle('on',e.dataset.s===s));const l=$('#stateLbl');l.textContent=names[s];l.classList.remove('sw');void l.offsetWidth;l.classList.add('sw')}
+const mmss=s=>{s=Math.max(0,Math.ceil(s));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
+
+async function play(i){
+  const id=++run;cur=((i%items.length)+items.length)%items.length;
+  const it=items[cur],ok=()=>id===run;
+  $('#plat').textContent=it.p;$('#typed').textContent='';show('idle');
+  await wait(500);if(!ok())return;
+  if(rm)$('#typed').textContent=it.u;
+  else for(const c of it.u){$('#typed').textContent+=c;await wait(28);if(!ok())return}
+  await wait(600);if(!ok())return;
+  $('#fetchUrl').textContent=it.u;show('fetch');
+  await wait(1600);if(!ok())return;
+  if(it.fail&&!failed[cur]){show('error');await wait(9000);if(ok())play(cur+1);return}
+  $('#vTitle').textContent=$('#dTitle').textContent=$('#pTitle').textContent=it.t;
+  $('#fname').textContent=it.t+' [1080p].mp4';
+  show('format');await wait(2400);if(!ok())return;
+  show('download');
+  const total=87.4;let done=0,spd=14;
+  const bar=$('#bar i');bar.style.transform='scaleX(0)';
+  while(done<total){
+    await wait(100);if(!ok())return;
+    spd+=((13+Math.random()*5)-spd)*.25;
+    done=Math.min(total,done+spd*.1);
+    bar.style.transform='scaleX('+(done/total)+')';
+    $('#pct').textContent=Math.floor(done/total*100)+'%';
+    $('#spd').textContent=spd.toFixed(1)+' MiB/s';
+    $('#eta').textContent='ETA '+mmss((total-done)/spd);
+    $('#sz').textContent=done.toFixed(1)+' / '+total+' MiB';
+  }
+  $('#bar').classList.remove('live');
+  await wait(300);if(!ok())return;
+  show('process');await wait(1800);if(!ok())return;
+  $('#bar').classList.add('live');
+  show('done');await wait(5000);if(ok())play(cur+1);
+}
+const upd=()=>{$('#pp').textContent=user?'Lanjut':'Jeda'};
+demo.addEventListener('mouseenter',()=>hold=true);
+demo.addEventListener('mouseleave',()=>hold=false);
+demo.addEventListener('focusin',()=>hold=true);
+demo.addEventListener('focusout',()=>hold=false);
+$('#pp').onclick=()=>{user=!user;upd()};
+$('#rp').onclick=()=>{failed={};user=false;upd();play(0)};
+$('#again').onclick=()=>play(cur+1);
+$('#chg').onclick=()=>play(cur+1);
+$('#retry').onclick=()=>{failed[cur]=1;play(cur)};
+play(0);
+</script>
 </body>
 </html>
